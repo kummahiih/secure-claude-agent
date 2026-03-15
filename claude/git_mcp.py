@@ -35,26 +35,35 @@ if not GIT_DIR or not GIT_WORK_TREE:
     )
     sys.exit(1)
 
-# Record the baseline commit at startup.
-# git_reset_soft refuses to go past this — the agent can only undo
-# commits it created during this session, never pre-existing history.
-BASELINE_COMMIT: str | None = None
-try:
-    _baseline_result = subprocess.run(
-        ["git", "-c", "core.hooksPath=/dev/null", "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-        env={**os.environ, "GIT_DIR": GIT_DIR, "GIT_WORK_TREE": GIT_WORK_TREE},
-    )
-    if _baseline_result.returncode == 0:
-        BASELINE_COMMIT = _baseline_result.stdout.strip()
-        print(f"Baseline commit: {BASELINE_COMMIT}", file=sys.stderr)
-    else:
-        # Empty repo — no commits yet, baseline stays None (reset will be blocked)
-        print("No baseline commit (empty repo)", file=sys.stderr)
-except Exception as e:
-    print(f"Warning: could not determine baseline commit: {e}", file=sys.stderr)
+# Baseline commit for git_reset_soft floor enforcement.
+# Must be set ONCE at container startup (in entrypoint.sh) and passed as
+# GIT_BASELINE_COMMIT env var. This survives across Claude Code subprocess
+# respawns — each query gets a fresh MCP server process, but the baseline
+# stays fixed to what existed when the container started.
+#
+# If not set, falls back to capturing HEAD now (less safe — resets to
+# whatever HEAD is at first tool invocation).
+BASELINE_COMMIT: str | None = os.environ.get("GIT_BASELINE_COMMIT")
+
+if BASELINE_COMMIT:
+    print(f"Baseline commit (from env): {BASELINE_COMMIT}", file=sys.stderr)
+else:
+    # Fallback: capture now (only useful for testing, not production)
+    try:
+        _baseline_result = subprocess.run(
+            ["git", "-c", "core.hooksPath=/dev/null", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env={**os.environ, "GIT_DIR": GIT_DIR, "GIT_WORK_TREE": GIT_WORK_TREE},
+        )
+        if _baseline_result.returncode == 0:
+            BASELINE_COMMIT = _baseline_result.stdout.strip()
+            print(f"Baseline commit (captured): {BASELINE_COMMIT}", file=sys.stderr)
+        else:
+            print("No baseline commit (empty repo)", file=sys.stderr)
+    except Exception as e:
+        print(f"Warning: could not determine baseline commit: {e}", file=sys.stderr)
 
 
 def _run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
