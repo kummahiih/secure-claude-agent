@@ -35,15 +35,13 @@ def git_repo(tmp_path):
     worktree.mkdir()
     gitdir.mkdir()
 
-    # Use GIT_DIR env var to init directly into the separated gitdir
+    # Use GIT_DIR env var to init directly into the separated gitdir.
+    # This avoids issues with .git files in nested repos.
     env = {**os.environ, "GIT_DIR": str(gitdir)}
     subprocess.run(
         ["git", "init"],
-        check=True,
-        capture_output=True,
-        text=True,
-        cwd=str(worktree),
-        env=env,
+        check=True, capture_output=True, text=True,
+        cwd=str(worktree), env=env,
     )
 
     # Configure user for commits
@@ -56,15 +54,9 @@ def git_repo(tmp_path):
         ["git", "config", "user.name", "Test User"],
         check=True, capture_output=True, env=env,
     )
-
-    # Configure user for commits
-    env = {**os.environ, "GIT_DIR": str(gitdir), "GIT_WORK_TREE": str(worktree)}
+    # Ensure it's not bare (GIT_DIR init can default to bare)
     subprocess.run(
-        ["git", "config", "user.email", "test@test.com"],
-        check=True, capture_output=True, env=env,
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "Test User"],
+        ["git", "config", "core.bare", "false"],
         check=True, capture_output=True, env=env,
     )
 
@@ -305,3 +297,138 @@ class TestHookPrevention:
         # This should succeed even with hooks present
         result = git_mcp.git_commit(message="no-verify test")
         assert result.isError is False
+
+
+def _make_commits(worktree, n):
+    """Helper: create n commits in the repo."""
+    env = {**os.environ, "GIT_DIR": git_mcp.GIT_DIR, "GIT_WORK_TREE": git_mcp.GIT_WORK_TREE}
+    for i in range(n):
+        (worktree / f"file{i}.py").write_text(f"v{i}\n")
+        subprocess.run(["git", "add", "."], check=True, capture_output=True, env=env)
+        subprocess.run(
+            ["git", "commit", "-m", f"commit {i}"],
+            check=True, capture_output=True, env=env,
+        )
+
+
+class TestGitResetSoft:
+    def test_reset_one_commit(self, git_repo):
+        worktree, _ = git_repo
+        # Create baseline commit
+        _make_commits(worktree, 1)
+        # Set baseline to current HEAD (simulating startup)
+        env = {**os.environ, "GIT_DIR": git_mcp.GIT_DIR, "GIT_WORK_TREE": git_mcp.GIT_WORK_TREE}
+        baseline = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, env=env,
+        ).stdout.strip()
+        git_mcp.BASELINE_COMMIT = baseline
+
+        # Agent makes a commit
+        (worktree / "agent_file.py").write_text("agent code\n")
+        git_mcp.git_add(paths=["."])
+        git_mcp.git_commit(message="agent commit")
+
+        # Reset it
+        result = git_mcp.git_reset_soft(count=1)
+        assert result.isError is False
+        assert "Reset 1 commit" in result.content[0].text
+
+        # Changes should still be staged
+        status = git_mcp.git_status()
+        assert "agent_file.py" in status.content[0].text
+
+    def test_reset_to_baseline_allowed(self, git_repo):
+        worktree, _ = git_repo
+        # Create 2 commits so baseline has history behind it
+        _make_commits(worktree, 2)
+        env = {**os.environ, "GIT_DIR": git_mcp.GIT_DIR, "GIT_WORK_TREE": git_mcp.GIT_WORK_TREE}
+        baseline = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, env=env,
+        ).stdout.strip()
+        git_mcp.BASELINE_COMMIT = baseline
+
+        # Agent makes one commit
+        (worktree / "agent.py").write_text("code\n")
+        git_mcp.git_add(paths=["."])
+        git_mcp.git_commit(message="agent commit")
+
+        # Reset back to baseline — should be allowed
+        result = git_mcp.git_reset_soft(count=1)
+        assert result.isError is False
+
+        # Now try to go past baseline — should be blocked
+        result = git_mcp.git_reset_soft(count=1)
+        assert result.isError is True
+
+    def test_reset_blocked_past_baseline(self, git_repo):
+        worktree, _ = git_repo
+        # Create 2 commits, set baseline at commit 1
+        _make_commits(worktree, 2)
+        env = {**os.environ, "GIT_DIR": git_mcp.GIT_DIR, "GIT_WORK_TREE": git_mcp.GIT_WORK_TREE}
+        baseline = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, env=env,
+        ).stdout.strip()
+        git_mcp.BASELINE_COMMIT = baseline
+
+        # Agent makes 1 commit
+        (worktree / "new.py").write_text("new\n")
+        git_mcp.git_add(paths=["."])
+        git_mcp.git_commit(message="agent commit")
+
+        # Try to reset 2 commits (would go past baseline)
+        result = git_mcp.git_reset_soft(count=2)
+        assert result.isError is True
+        assert "baseline" in result.content[0].text.lower()
+
+    def test_reset_multiple_agent_commits(self, git_repo):
+        worktree, _ = git_repo
+        # Create baseline with 2 commits so HEAD~1 exists at baseline
+        _make_commits(worktree, 2)
+        env = {**os.environ, "GIT_DIR": git_mcp.GIT_DIR, "GIT_WORK_TREE": git_mcp.GIT_WORK_TREE}
+        baseline = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, env=env,
+        ).stdout.strip()
+        git_mcp.BASELINE_COMMIT = baseline
+
+        # Agent makes 3 commits
+        for i in range(3):
+            (worktree / f"agent{i}.py").write_text(f"code{i}\n")
+            git_mcp.git_add(paths=["."])
+            git_mcp.git_commit(message=f"agent commit {i}")
+
+        # Reset 2 of them — should work (still above baseline)
+        result = git_mcp.git_reset_soft(count=2)
+        assert result.isError is False
+
+        # Reset 1 more — lands on baseline, should work
+        result = git_mcp.git_reset_soft(count=1)
+        assert result.isError is False
+
+        # Now at baseline — further reset should be blocked
+        result = git_mcp.git_reset_soft(count=1)
+        assert result.isError is True
+        assert "baseline" in result.content[0].text.lower()
+
+    def test_reset_no_baseline(self, git_repo):
+        """Empty repo at startup — reset should be blocked entirely."""
+        git_mcp.BASELINE_COMMIT = None
+        result = git_mcp.git_reset_soft(count=1)
+        assert result.isError is True
+        assert "no baseline" in result.content[0].text.lower()
+
+    def test_reset_count_clamped(self, git_repo):
+        worktree, _ = git_repo
+        _make_commits(worktree, 1)
+        env = {**os.environ, "GIT_DIR": git_mcp.GIT_DIR, "GIT_WORK_TREE": git_mcp.GIT_WORK_TREE}
+        git_mcp.BASELINE_COMMIT = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, env=env,
+        ).stdout.strip()
+
+        # count > 5 should be clamped to 5, then fail because not enough history
+        result = git_mcp.git_reset_soft(count=100)
+        assert result.isError is True

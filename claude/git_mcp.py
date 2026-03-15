@@ -35,6 +35,27 @@ if not GIT_DIR or not GIT_WORK_TREE:
     )
     sys.exit(1)
 
+# Record the baseline commit at startup.
+# git_reset_soft refuses to go past this — the agent can only undo
+# commits it created during this session, never pre-existing history.
+BASELINE_COMMIT: str | None = None
+try:
+    _baseline_result = subprocess.run(
+        ["git", "-c", "core.hooksPath=/dev/null", "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env={**os.environ, "GIT_DIR": GIT_DIR, "GIT_WORK_TREE": GIT_WORK_TREE},
+    )
+    if _baseline_result.returncode == 0:
+        BASELINE_COMMIT = _baseline_result.stdout.strip()
+        print(f"Baseline commit: {BASELINE_COMMIT}", file=sys.stderr)
+    else:
+        # Empty repo — no commits yet, baseline stays None (reset will be blocked)
+        print("No baseline commit (empty repo)", file=sys.stderr)
+except Exception as e:
+    print(f"Warning: could not determine baseline commit: {e}", file=sys.stderr)
+
 
 def _run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     """Run a git command with structural safety flags.
@@ -198,6 +219,66 @@ def git_log(max_count: int = 10) -> types.CallToolResult:
         return _err(f"git log error: {e}")
 
 
+def git_reset_soft(count: int = 1) -> types.CallToolResult:
+    """Undo the last N commits, keeping changes staged.
+
+    Enforces a baseline floor: cannot reset past the commit that existed
+    when git_mcp.py started. The agent can only undo its own commits.
+
+    Args:
+        count: Number of commits to undo (default 1, max 5).
+    """
+    count = min(max(1, count), 5)
+
+    if BASELINE_COMMIT is None:
+        return _err("Cannot reset — no baseline commit (empty repo at startup)")
+
+    try:
+        # Resolve what HEAD~count points to
+        target_result = _run_git(
+            "rev-parse", f"HEAD~{count}",
+            check=False,
+        )
+        if target_result.returncode != 0:
+            return _err(
+                f"Cannot reset {count} commits — not enough history. "
+                f"{target_result.stderr.strip()}"
+            )
+        target_commit = target_result.stdout.strip()
+
+        # Enforce baseline floor: allow resetting TO the baseline but not past it.
+        # If target equals baseline, that's fine — we're undoing only agent commits.
+        # If target is a strict ancestor of baseline, we'd be erasing pre-existing history.
+        if target_commit != BASELINE_COMMIT:
+            # Check if target is an ancestor of baseline (i.e., older than baseline)
+            ancestor_check = _run_git(
+                "merge-base", "--is-ancestor", target_commit, BASELINE_COMMIT,
+                check=False,
+            )
+            if ancestor_check.returncode == 0:
+                # target is strictly before baseline — block
+                return _err(
+                    f"Cannot reset {count} commits — would go past the baseline commit "
+                    f"({BASELINE_COMMIT[:12]}). You can only undo commits created during "
+                    f"this session."
+                )
+
+        # Safe to reset
+        result = _run_git("reset", "--soft", f"HEAD~{count}", check=False)
+        if result.returncode != 0:
+            return _err(f"git reset failed: {result.stderr.strip()}")
+
+        return _ok(
+            f"Reset {count} commit(s). Changes are still staged. "
+            f"HEAD is now at {target_commit[:12]}."
+        )
+
+    except subprocess.TimeoutExpired:
+        return _err("git reset timed out")
+    except Exception as e:
+        return _err(f"git reset error: {e}")
+
+
 # --- MCP server wiring ---
 
 server = Server("git-mcp")
@@ -268,6 +349,24 @@ TOOLS = [
             },
         },
     ),
+    types.Tool(
+        name="git_reset_soft",
+        description=(
+            "Undo the last N commits, keeping all changes staged. "
+            "Cannot reset past the baseline commit that existed at startup — "
+            "only commits created during this session can be undone."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "description": "Number of commits to undo (default 1, max 5).",
+                    "default": 1,
+                },
+            },
+        },
+    ),
 ]
 
 
@@ -291,6 +390,8 @@ async def handle_call_tool(
             return git_commit(message=arguments.get("message", ""))
         case "git_log":
             return git_log(max_count=arguments.get("max_count", 10))
+        case "git_reset_soft":
+            return git_reset_soft(count=arguments.get("count", 1))
         case _:
             return _err(f"Unknown tool: {name}")
 
