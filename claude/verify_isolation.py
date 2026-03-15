@@ -4,28 +4,36 @@ verify_isolation.py — Runtime isolation checks for secure-claude containers.
 Call verify_all() at daemon startup. It fails hard (sys.exit(1)) if any
 structural security invariant is violated.
 
+IMPORTANT: This must only run at the entrypoint/daemon level, NEVER inside
+MCP subprocess children (e.g., files_mcp.py). Claude Code passes
+ANTHROPIC_API_KEY to its child processes, which would false-positive
+the forbidden env var check.
+
 Each container role has its own check profile:
 - claude-server: must not see real API key, must not see parent repo artifacts
 - proxy: must see real API key, must not see workspace or agent code
 - mcp-server: must not see real API key, must not see parent repo artifacts
 
-Usage in daemon startup:
+Usage in daemon startup (entrypoint.sh or top of server.py):
     from verify_isolation import verify_all
     verify_all(role="claude-server")
+
+DO NOT call from: files_mcp.py, git_mcp.py, or any MCP stdio server.
 """
 
 import os
 import sys
 import logging
-import setuplogging
 
 logger = logging.getLogger("verify_isolation")
 
 
 # --- Env var checks ---
 
-# These env vars must NEVER appear in the claude-server or mcp-server containers.
+# These env vars must NEVER appear in the container at entrypoint time.
 # If they do, credential isolation has failed.
+# Note: ANTHROPIC_API_KEY will later be injected into the Claude Code
+# subprocess scope by server.py — but at entrypoint time it must not exist.
 FORBIDDEN_ENV_VARS = {
     "claude-server": [
         "ANTHROPIC_API_KEY",  # Real key — only proxy should have this
@@ -41,8 +49,10 @@ FORBIDDEN_ENV_VARS = {
 # These env vars MUST be present for the container to function correctly.
 REQUIRED_ENV_VARS = {
     "claude-server": [
-        "DYNAMIC_AGENT_KEY",  # Ephemeral key for talking to proxy
-        "MCP_API_TOKEN",      # For authenticating to mcp-server
+        "DYNAMIC_AGENT_KEY",      # Ephemeral key, renamed to ANTHROPIC_API_KEY in subprocess
+        "MCP_API_TOKEN",          # For authenticating to mcp-server
+        "CLAUDE_API_TOKEN",       # For ingress auth via Caddy
+        "ANTHROPIC_BASE_URL",     # Points to proxy:4000
     ],
     "mcp-server": [
         "MCP_API_TOKEN",
@@ -91,11 +101,13 @@ FORBIDDEN_PATHS = {
     ],
 }
 
-# Files/dirs that MUST exist — sanity check that mounts are correct.
+# Files/dirs that MUST exist — sanity check that mounts and copies are correct.
 REQUIRED_PATHS = {
     "claude-server": [
         "/app/server.py",
         "/app/files_mcp.py",
+        "/app/verify_isolation.py",
+        "/home/appuser/sandbox/.mcp.json",  # MCP config baked into image
     ],
     "mcp-server": [
         "/workspace",
@@ -103,8 +115,9 @@ REQUIRED_PATHS = {
     "proxy": [],
 }
 
-# /workspace must contain ONLY these top-level entries in claude-server and mcp-server.
+# /workspace must contain ONLY these top-level entries in mcp-server.
 # Anything else means parent repo content leaked through the mount.
+# Note: claude-server doesn't mount /workspace, so this only applies to mcp-server.
 WORKSPACE_ALLOWED_ENTRIES = {"claude", "fileserver", ".git", ".gitignore", "README.md", "LICENSE"}
 
 
@@ -125,7 +138,7 @@ def find_env_files(search_roots: list[str]) -> list[str]:
 
 # Directories to scan for .env files per role.
 ENV_FILE_SCAN_DIRS = {
-    "claude-server": ["/app", "/workspace", "/home/appuser"],
+    "claude-server": ["/app", "/home/appuser"],
     "mcp-server": ["/workspace", "/app"],
     "proxy": ["/app"],
 }
@@ -136,11 +149,11 @@ ENV_FILE_SCAN_DIRS = {
 def check_git_no_parent_leak(workspace: str = "/workspace") -> list[str]:
     """
     Verify that .git inside /workspace does not reference the parent repo.
-    
+
     In a proper submodule mount, .git should either be:
     - A directory (detached submodule clone), OR
     - A file pointing to a .git dir within the same mount
-    
+
     It must NOT be a gitfile pointing outside /workspace (e.g., ../.git/modules/...).
     """
     errors = []
@@ -165,6 +178,27 @@ def check_git_no_parent_leak(workspace: str = "/workspace") -> list[str]:
         except OSError as e:
             errors.append(f"Cannot read .git file: {e}")
 
+    return errors
+
+
+# --- MCP config validation ---
+
+def check_mcp_config(config_path: str) -> list[str]:
+    """Verify MCP config file exists and has valid structure."""
+    import json
+    errors = []
+    if not os.path.exists(config_path):
+        errors.append(f"MCP config missing: {config_path}")
+        return errors
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+        if "mcpServers" not in config:
+            errors.append(f"MCP config missing 'mcpServers' key: {config_path}")
+        elif "fileserver" not in config["mcpServers"]:
+            errors.append(f"MCP config missing 'fileserver' entry: {config_path}")
+    except (json.JSONDecodeError, OSError) as e:
+        errors.append(f"MCP config invalid: {config_path}: {e}")
     return errors
 
 
@@ -207,8 +241,8 @@ def verify_all(role: str) -> None:
     for ef in env_files:
         violations.append(f".env file found: {ef}")
 
-    # 6. Workspace entry whitelist (claude-server and mcp-server only)
-    if role in ("claude-server", "mcp-server") and os.path.isdir("/workspace"):
+    # 6. Workspace entry whitelist (mcp-server only — claude-server doesn't mount /workspace)
+    if role == "mcp-server" and os.path.isdir("/workspace"):
         entries = set(os.listdir("/workspace"))
         unexpected = entries - WORKSPACE_ALLOWED_ENTRIES
         if unexpected:
@@ -216,10 +250,15 @@ def verify_all(role: str) -> None:
                 f"/workspace contains unexpected entries: {sorted(unexpected)}"
             )
 
-    # 7. .git parent leak check
-    if role in ("claude-server", "mcp-server"):
+    # 7. .git parent leak check (mcp-server only)
+    if role == "mcp-server":
         git_errors = check_git_no_parent_leak("/workspace")
         violations.extend(git_errors)
+
+    # 8. MCP config validation (claude-server only)
+    if role == "claude-server":
+        mcp_errors = check_mcp_config("/home/appuser/sandbox/.mcp.json")
+        violations.extend(mcp_errors)
 
     # Report
     if violations:
@@ -240,9 +279,11 @@ def _count_checks(role: str) -> int:
     count += len(FORBIDDEN_PATHS.get(role, []))
     count += len(REQUIRED_PATHS.get(role, []))
     count += 1  # .env file scan
-    if role in ("claude-server", "mcp-server"):
+    if role == "mcp-server":
         count += 1  # workspace entry whitelist
         count += 1  # .git leak check
+    if role == "claude-server":
+        count += 1  # MCP config validation
     return count
 
 
