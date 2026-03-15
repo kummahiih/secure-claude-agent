@@ -7,7 +7,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import setuplogging
-from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN
+from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN, SYSTEM_PROMPT
 from verify_isolation import verify_all
 
 logger = logging.getLogger(__name__)
@@ -50,12 +50,12 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
     try:
         result = subprocess.run(
             [
-                "claude", "--print",
-                "--dangerously-skip-permissions",
+                "claude", "--print", "--dangerously-skip-permissions",
                 "--output-format", "json",
+                "--mcp-config", "/home/appuser/sandbox/.mcp.json",
                 "--model", request.model,
-                "--system-prompt", "You do NOT have access to the local filesystem. You have NO local file tools. The ONLY way to read, write, list, or delete files is through the MCP fileserver tools (read_workspace_file, list_files, create_file, write_file, delete_file). Always start by calling list_files to see what exists. Never attempt to access files by local path.",
-                request.query],
+                "--system-prompt", SYSTEM_PROMPT,
+                "--", request.query],
             cwd="/home/appuser/sandbox",
             capture_output=True,
             text=True,

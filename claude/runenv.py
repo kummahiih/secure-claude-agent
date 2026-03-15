@@ -4,6 +4,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+SYSTEM_PROMPT = "You do NOT have access to the local filesystem. You have NO local file tools. The ONLY way to read, write, list, or delete files is through the MCP fileserver tools (read_workspace_file, list_files, create_file, write_file, delete_file). Always start by calling list_files to see what exists. Never attempt to access files by local path."
+
 # Environment variables injected by Docker Compose / run.sh
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "https://mcp-server:8443")
 MCP_API_TOKEN = os.getenv("MCP_API_TOKEN")

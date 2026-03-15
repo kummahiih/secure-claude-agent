@@ -160,7 +160,10 @@ async def _dispatch(name: str, arguments: dict) -> str:
 
 
 if __name__ == "__main__":
-    verify_all(role="claude-server")
+    # verify_all runs in entrypoint.sh before server.py starts.
+    # files_mcp.py is launched as a subprocess by Claude Code,
+    # which passes ANTHROPIC_API_KEY in its child environment.
+    # Running isolation checks here would false-positive on that key.
 
     async def main():
         async with stdio_server() as (read_stream, write_stream):

@@ -1,17 +1,12 @@
 #!/bin/bash
 set -e
 
-# Register files_mcp.py as a stdio MCP server wrapped by mcp-watchdog
-claude mcp add fileserver --scope user -- \
-    mcp-watchdog --verbose -- python /app/files_mcp.py
+# MCP config is baked into the image at build time:
+#   /home/appuser/sandbox/.mcp.json (read-only, 440)
+# Passed to Claude Code via --mcp-config flag in server.py
+# No runtime registration needed — no dependency on claude mcp add internals
 
-# Verify config was written before locking
-if [ ! -f /home/appuser/.claude.json ]; then
-    echo "ERROR: .claude.json was not written by claude mcp add"
-    exit 1
-fi
-
-# Lock only the config file, not the directory
-chmod 440 /home/appuser/.claude.json
+# Run isolation checks before serving traffic
+python /app/verify_isolation.py claude-server || exit 1
 
 exec python /app/server.py

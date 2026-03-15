@@ -4,8 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 
-# 1. Inject dummy keys BEFORE importing server.py
-os.environ["CLAUDE_API_TOKEN"] = "secure-test-token"
+from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN, SYSTEM_PROMPT
+
 
 # Ensure the local directory is in the path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -40,12 +40,12 @@ def test_fastapi_endpoint_authorized_success():
         assert json_response["response"] == "Here is the status."
         mock_run.assert_called_once_with(
             [
-                "claude", "--print",
-                "--dangerously-skip-permissions",
+                "claude", "--print", "--dangerously-skip-permissions",
                 "--output-format", "json",
+                "--mcp-config", "/home/appuser/sandbox/.mcp.json",
                 "--model", "claude-sonnet-4-6",
-                "--system-prompt", "You have access to a workspace through MCP fileserver tools. Always use MCP tools to read, write, list and delete files. Never access the local filesystem directly.",
-                 "What is the status?"],
+                "--system-prompt", SYSTEM_PROMPT,
+                "--", "What is the status?"],
             cwd="/home/appuser/sandbox",
             capture_output=True,
             text=True,
@@ -54,6 +54,7 @@ def test_fastapi_endpoint_authorized_success():
                 **os.environ,
                 "CLAUDE_CONFIG_DIR": "/home/appuser",
                 "HOME": "/home/appuser",
+                "ANTHROPIC_API_KEY": DYNAMIC_AGENT_KEY,
             }
         )
 
