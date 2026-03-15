@@ -24,8 +24,6 @@ def clean_env_claude_server():
         "MCP_API_TOKEN": "test-mcp-token",
         "CLAUDE_API_TOKEN": "test-claude-token",
         "ANTHROPIC_BASE_URL": "https://proxy:4000",
-        # Note: ANTHROPIC_API_KEY is intentionally absent — it only exists
-        # inside the Claude Code subprocess, not at entrypoint time.
     }
 
 
@@ -34,6 +32,7 @@ def clean_env_proxy():
     """Env vars that a correctly configured proxy would have."""
     return {
         "ANTHROPIC_API_KEY": "sk-ant-real-key",
+        "DYNAMIC_AGENT_KEY": "test-dynamic-key",
     }
 
 
@@ -45,29 +44,40 @@ def clean_env_mcp_server():
     }
 
 
-# --- Helper to mock filesystem for claude-server passing all checks ---
-
-def _mock_claude_server_fs():
-    """Return mocks that simulate a clean claude-server filesystem."""
-    valid_mcp_json = '{"mcpServers": {"fileserver": {"type": "stdio"}}}'
-
-    def exists_side_effect(p):
-        # Required paths exist, forbidden paths don't
-        required = {"/app/server.py", "/app/files_mcp.py",
-                    "/app/verify_isolation.py", "/home/appuser/sandbox/.mcp.json"}
-        return p in required
-
+@pytest.fixture
+def clean_env_caddy():
+    """Env vars that a correctly configured caddy would have."""
     return {
-        "exists": exists_side_effect,
-        "isdir": lambda p: False,  # No /workspace in claude-server
-        "mcp_json": valid_mcp_json,
     }
+
+
+# --- Helpers for filesystem mocking ---
+
+# Required paths per role — exists() returns True for these
+ROLE_REQUIRED_PATHS = {
+    "claude-server": {
+        "/app/server.py", "/app/files_mcp.py",
+        "/app/verify_isolation.py", "/home/appuser/sandbox/.mcp.json",
+    },
+    "mcp-server": {"/workspace"},
+    "proxy": {"/app/certs/proxy.crt", "/app/certs/proxy.key"},
+    "caddy": {
+        "/etc/caddy/certs/caddy.crt", "/etc/caddy/certs/caddy.key",
+        "/etc/caddy/certs/ca.crt",
+    },
+}
+
+
+def _make_exists(role):
+    """Return an os.path.exists side_effect that passes required paths and fails forbidden."""
+    required = ROLE_REQUIRED_PATHS.get(role, set())
+    return lambda p: p in required
 
 
 # --- Env var tests ---
 
 class TestForbiddenEnvVars:
-    """claude-server and mcp-server must never see ANTHROPIC_API_KEY at entrypoint."""
+    """Containers must never see env vars that belong to other containers."""
 
     def test_claude_server_rejects_real_api_key(self, clean_env_claude_server):
         env = {**clean_env_claude_server, "ANTHROPIC_API_KEY": "sk-ant-real-key"}
@@ -81,12 +91,35 @@ class TestForbiddenEnvVars:
             with pytest.raises(SystemExit):
                 vi.verify_all("mcp-server")
 
+    def test_proxy_rejects_mcp_token(self, clean_env_proxy):
+        env = {**clean_env_proxy, "MCP_API_TOKEN": "leaked"}
+        with patch.dict(os.environ, env, clear=True), \
+             patch("os.path.exists", side_effect=_make_exists("proxy")), \
+             patch("verify_isolation.find_env_files", return_value=[]):
+            with pytest.raises(SystemExit):
+                vi.verify_all("proxy")
+
+    def test_proxy_rejects_claude_api_token(self, clean_env_proxy):
+        env = {**clean_env_proxy, "CLAUDE_API_TOKEN": "leaked"}
+        with patch.dict(os.environ, env, clear=True), \
+             patch("os.path.exists", side_effect=_make_exists("proxy")), \
+             patch("verify_isolation.find_env_files", return_value=[]):
+            with pytest.raises(SystemExit):
+                vi.verify_all("proxy")
+
     def test_proxy_allows_real_api_key(self, clean_env_proxy):
         """Proxy is the one container that SHOULD have the real key."""
         with patch.dict(os.environ, clean_env_proxy, clear=True), \
+             patch("os.path.exists", side_effect=_make_exists("proxy")), \
              patch("verify_isolation.find_env_files", return_value=[]):
-            # Should not raise
             vi.verify_all("proxy")
+
+    def test_caddy_rejects_all_backend_tokens(self, clean_env_caddy):
+        for var in ["ANTHROPIC_API_KEY", "DYNAMIC_AGENT_KEY", "MCP_API_TOKEN", "CLAUDE_API_TOKEN"]:
+            env = {**clean_env_caddy, var: "leaked"}
+            with patch.dict(os.environ, env, clear=True):
+                with pytest.raises(SystemExit):
+                    vi.verify_all("caddy")
 
 
 class TestRequiredEnvVars:
@@ -127,6 +160,7 @@ class TestRequiredEnvVars:
                 vi.verify_all("mcp-server")
 
 
+
 # --- Filesystem tests ---
 
 class TestForbiddenPaths:
@@ -144,12 +178,36 @@ class TestForbiddenPaths:
     def test_claude_server_rejects_forbidden_path(
         self, clean_env_claude_server, forbidden_path
     ):
+        required = ROLE_REQUIRED_PATHS["claude-server"]
         with patch.dict(os.environ, clean_env_claude_server, clear=True), \
-             patch("os.path.exists") as mock_exists:
-            # Only the forbidden path "exists"
-            mock_exists.side_effect = lambda p: p == forbidden_path
+             patch("os.path.exists", side_effect=lambda p: p == forbidden_path or p in required):
             with pytest.raises(SystemExit):
                 vi.verify_all("claude-server")
+
+    @pytest.mark.parametrize("forbidden_path", [
+        "/app/server.py",
+        "/app/files_mcp.py",
+        "/workspace",
+    ])
+    def test_proxy_rejects_forbidden_path(self, clean_env_proxy, forbidden_path):
+        required = ROLE_REQUIRED_PATHS["proxy"]
+        with patch.dict(os.environ, clean_env_proxy, clear=True), \
+             patch("os.path.exists", side_effect=lambda p: p == forbidden_path or p in required), \
+             patch("verify_isolation.find_env_files", return_value=[]):
+            with pytest.raises(SystemExit):
+                vi.verify_all("proxy")
+
+    @pytest.mark.parametrize("forbidden_path", [
+        "/app",
+        "/workspace",
+    ])
+    def test_caddy_rejects_forbidden_path(self, clean_env_caddy, forbidden_path):
+        required = ROLE_REQUIRED_PATHS["caddy"]
+        with patch.dict(os.environ, clean_env_caddy, clear=True), \
+             patch("os.path.exists", side_effect=lambda p: p == forbidden_path or p in required), \
+             patch("verify_isolation.find_env_files", return_value=[]):
+            with pytest.raises(SystemExit):
+                vi.verify_all("caddy")
 
 
 class TestWorkspaceEntries:
@@ -160,35 +218,32 @@ class TestWorkspaceEntries:
     def test_clean_workspace_passes(self, clean_env_mcp_server):
         clean_entries = ["claude", "fileserver", ".git", ".gitignore"]
         with patch.dict(os.environ, clean_env_mcp_server, clear=True), \
-             patch("os.path.exists") as mock_exists, \
+             patch("os.path.exists", side_effect=_make_exists("mcp-server")), \
              patch("os.path.isdir", return_value=True), \
              patch("os.listdir", return_value=clean_entries), \
              patch("verify_isolation.find_env_files", return_value=[]), \
              patch("verify_isolation.check_git_no_parent_leak", return_value=[]):
-            mock_exists.side_effect = lambda p: p == "/workspace"
             vi.verify_all("mcp-server")
 
     def test_workspace_with_docker_compose_fails(self, clean_env_mcp_server):
         leaked_entries = ["claude", "fileserver", ".git", "docker-compose.yml"]
         with patch.dict(os.environ, clean_env_mcp_server, clear=True), \
-             patch("os.path.exists") as mock_exists, \
+             patch("os.path.exists", side_effect=_make_exists("mcp-server")), \
              patch("os.path.isdir", return_value=True), \
              patch("os.listdir", return_value=leaked_entries), \
              patch("verify_isolation.find_env_files", return_value=[]), \
              patch("verify_isolation.check_git_no_parent_leak", return_value=[]):
-            mock_exists.side_effect = lambda p: p == "/workspace"
             with pytest.raises(SystemExit):
                 vi.verify_all("mcp-server")
 
     def test_workspace_with_secrets_dir_fails(self, clean_env_mcp_server):
         leaked_entries = ["claude", "fileserver", "certs", ".secrets.env"]
         with patch.dict(os.environ, clean_env_mcp_server, clear=True), \
-             patch("os.path.exists") as mock_exists, \
+             patch("os.path.exists", side_effect=_make_exists("mcp-server")), \
              patch("os.path.isdir", return_value=True), \
              patch("os.listdir", return_value=leaked_entries), \
              patch("verify_isolation.find_env_files", return_value=[]), \
              patch("verify_isolation.check_git_no_parent_leak", return_value=[]):
-            mock_exists.side_effect = lambda p: p == "/workspace"
             with pytest.raises(SystemExit):
                 vi.verify_all("mcp-server")
 
@@ -202,7 +257,7 @@ class TestEnvFileScanner:
         (tmp_path / ".secrets.env").touch()
         (tmp_path / "sub").mkdir()
         (tmp_path / "sub" / ".env").touch()
-        (tmp_path / "sub" / "config.yaml").touch()  # not .env
+        (tmp_path / "sub" / "config.yaml").touch()
 
         found = vi.find_env_files([str(tmp_path)])
         assert len(found) == 2
@@ -288,22 +343,33 @@ class TestFullPass:
     """Verify that clean configurations pass all checks."""
 
     def test_claude_server_clean_passes(self, clean_env_claude_server):
-        fs = _mock_claude_server_fs()
         with patch.dict(os.environ, clean_env_claude_server, clear=True), \
-             patch("os.path.exists", side_effect=fs["exists"]), \
-             patch("os.path.isdir", side_effect=fs["isdir"]), \
+             patch("os.path.exists", side_effect=_make_exists("claude-server")), \
+             patch("os.path.isdir", return_value=False), \
              patch("verify_isolation.find_env_files", return_value=[]), \
-             patch("builtins.open", create=True) as mock_open:
-            import io
-            mock_open.return_value.__enter__ = lambda s: io.StringIO(fs["mcp_json"])
-            mock_open.return_value.__exit__ = lambda s, *a: None
-            # This should not raise
+             patch("verify_isolation.check_mcp_config", return_value=[]):
             vi.verify_all("claude-server")
 
     def test_proxy_clean_passes(self, clean_env_proxy):
         with patch.dict(os.environ, clean_env_proxy, clear=True), \
+             patch("os.path.exists", side_effect=_make_exists("proxy")), \
              patch("verify_isolation.find_env_files", return_value=[]):
             vi.verify_all("proxy")
+
+    def test_mcp_server_clean_passes(self, clean_env_mcp_server):
+        with patch.dict(os.environ, clean_env_mcp_server, clear=True), \
+             patch("os.path.exists", side_effect=_make_exists("mcp-server")), \
+             patch("os.path.isdir", return_value=True), \
+             patch("os.listdir", return_value=["claude", "fileserver", ".git"]), \
+             patch("verify_isolation.find_env_files", return_value=[]), \
+             patch("verify_isolation.check_git_no_parent_leak", return_value=[]):
+            vi.verify_all("mcp-server")
+
+    def test_caddy_clean_passes(self, clean_env_caddy):
+        with patch.dict(os.environ, clean_env_caddy, clear=True), \
+             patch("os.path.exists", side_effect=_make_exists("caddy")), \
+             patch("verify_isolation.find_env_files", return_value=[]):
+            vi.verify_all("caddy")
 
 
 # --- Unknown role test ---

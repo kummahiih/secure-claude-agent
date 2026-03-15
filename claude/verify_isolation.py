@@ -42,7 +42,15 @@ FORBIDDEN_ENV_VARS = {
         "ANTHROPIC_API_KEY",
     ],
     "proxy": [
-        # Proxy SHOULD have ANTHROPIC_API_KEY. No forbidden env vars.
+        "MCP_API_TOKEN",          # Internal MCP auth, not for proxy
+        "CLAUDE_API_TOKEN",       # Ingress auth, not for proxy
+    ],
+    "caddy": [
+        "ANTHROPIC_API_KEY",      # Real key, not for caddy
+        "DYNAMIC_AGENT_KEY",      # Agent-side token, not for caddy
+        "MCP_API_TOKEN",          # Internal MCP auth, not for caddy
+        "CLAUDE_API_TOKEN",       # Ingress auth handled via Caddyfile, not env
+        "AGENT_API_TOKEN",        # Auth is handled by claude-server, not Caddy
     ],
 }
 
@@ -58,7 +66,10 @@ REQUIRED_ENV_VARS = {
         "MCP_API_TOKEN",
     ],
     "proxy": [
-        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_API_KEY",      # Real key for upstream
+        "DYNAMIC_AGENT_KEY",      # Virtual key validation
+    ],
+    "caddy": [
     ],
 }
 
@@ -97,7 +108,15 @@ FORBIDDEN_PATHS = {
         "/workspace/certs",
     ],
     "proxy": [
-        # Proxy doesn't mount /workspace at all
+        # Proxy must not have agent code or workspace
+        "/app/server.py",
+        "/app/files_mcp.py",
+        "/workspace",
+    ],
+    "caddy": [
+        # Caddy must not have agent code, proxy config, or workspace
+        "/app",
+        "/workspace",
     ],
 }
 
@@ -112,7 +131,15 @@ REQUIRED_PATHS = {
     "mcp-server": [
         "/workspace",
     ],
-    "proxy": [],
+    "proxy": [
+        "/app/certs/proxy.crt",
+        "/app/certs/proxy.key",
+    ],
+    "caddy": [
+        "/etc/caddy/certs/caddy.crt",
+        "/etc/caddy/certs/caddy.key",
+        "/etc/caddy/certs/ca.crt",
+    ],
 }
 
 # /workspace must contain ONLY these top-level entries in mcp-server.
@@ -141,6 +168,7 @@ ENV_FILE_SCAN_DIRS = {
     "claude-server": ["/app", "/home/appuser"],
     "mcp-server": ["/workspace", "/app"],
     "proxy": ["/app"],
+    "caddy": ["/etc/caddy"],
 }
 
 
