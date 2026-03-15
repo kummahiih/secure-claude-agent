@@ -14,10 +14,10 @@ CLAUDE_API_TOKEN = os.getenv("CLAUDE_API_TOKEN")
 if not CLAUDE_API_TOKEN:
     logging.error("CLAUDE_API_TOKEN is not set!")
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+DYNAMIC_AGENT_KEY = os.getenv("DYNAMIC_AGENT_KEY")
 # Ensure we have the key, otherwise the agent will fail silently with 401s
-if not ANTHROPIC_API_KEY:
-    logging.error("DYNAMIC_AGENT_KEY (passed as ANTHROPIC_API_KEY) is not set!")
+if not DYNAMIC_AGENT_KEY:
+    logging.error("DYNAMIC_AGENT_KEY (passed as DYNAMIC_AGENT_KEY) is not set!")
 
 ANTHROPIC_BASE_URL = os.getenv("ANTHROPIC_BASE_URL")
 if not ANTHROPIC_BASE_URL:

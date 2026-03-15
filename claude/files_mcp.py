@@ -10,6 +10,8 @@ from mcp.types import CallToolResult, TextContent
 import asyncio
 from mcp.server.stdio import stdio_server
 from mcp.server import NotificationOptions
+from verify_isolation import verify_all
+
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +160,7 @@ async def _dispatch(name: str, arguments: dict) -> str:
 
 
 if __name__ == "__main__":
-    
+    verify_all(role="claude-server")
 
     async def main():
         async with stdio_server() as (read_stream, write_stream):
