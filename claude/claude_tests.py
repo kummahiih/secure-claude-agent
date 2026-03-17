@@ -49,7 +49,7 @@ def test_fastapi_endpoint_authorized_success():
             cwd="/home/appuser/sandbox",
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
             env={
                 **os.environ,
                 "CLAUDE_CONFIG_DIR": "/home/appuser",

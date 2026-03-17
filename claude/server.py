@@ -59,7 +59,7 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
             cwd="/home/appuser/sandbox",
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
             env={
                 **os.environ,
                 "CLAUDE_CONFIG_DIR": "/home/appuser",
@@ -110,7 +110,7 @@ async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
             cwd="/home/appuser/sandbox",
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
             env={
                 **os.environ,
                 "CLAUDE_CONFIG_DIR": "/home/appuser",
