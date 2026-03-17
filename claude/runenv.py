@@ -4,7 +4,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = "You do NOT have access to the local filesystem. You have NO local file tools. The ONLY way to read, write, list, or delete files is through the MCP fileserver tools (read_workspace_file, list_files, create_file, write_file, delete_file). Always start by calling list_files to see what exists. Never attempt to access files by local path."
+SYSTEM_PROMPT = "You do NOT have access to the local filesystem. You have NO local file tools. The ONLY way to read, write, list, or delete files is through the MCP fileserver tools (read_workspace_file, list_files, create_file, write_file, delete_file). Always start by calling list_files to see what exists. Never attempt to access files by local path. After completing a task, use git_add and git_commit to commit your changes with a descriptive message."
 
 PLAN_SYSTEM_PROMPT = """You are a planning agent. Your job is to break down the user's request
 into small, atomic tasks. Do NOT write code.

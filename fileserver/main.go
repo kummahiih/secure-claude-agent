@@ -21,6 +21,24 @@ func handleRead(rootDir *os.Root, token string) http.HandlerFunc {
 
 		targetPath := r.URL.Query().Get("path")
 
+		// Reject missing or empty file_path parameter.
+		if targetPath == "" {
+			http.Error(w, "Bad Request: file_path is required", http.StatusBadRequest)
+			return
+		}
+
+		// Reject paths containing null bytes.
+		if strings.Contains(targetPath, "\x00") {
+			http.Error(w, "Bad Request: file_path must not contain null bytes", http.StatusBadRequest)
+			return
+		}
+
+		// Reject paths exceeding 4096 bytes.
+		if len(targetPath) > 4096 {
+			http.Error(w, "Bad Request: file_path must not exceed 4096 bytes", http.StatusBadRequest)
+			return
+		}
+
 		log.Printf("Received request for %s", targetPath)
 
 		file, err := rootDir.Open(targetPath)
