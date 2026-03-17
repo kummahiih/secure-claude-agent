@@ -7,7 +7,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import setuplogging
-from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN, SYSTEM_PROMPT
+from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN, SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT
 from verify_isolation import verify_all
 
 logger = logging.getLogger(__name__)
@@ -84,6 +84,55 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
             return {"response": parsed.get("result", "")}
         except json.JSONDecodeError:
             # fallback in case output is plain text
+            return {"response": result.stdout.strip()}
+
+    except subprocess.TimeoutExpired:
+        logger.error("Claude Code timed out.")
+        return {"error": "Agent timed out."}
+    except Exception as e:
+        logger.error(f"Agent execution failed: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/plan")
+async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
+    """Planning endpoint — Claude produces a plan without writing code."""
+    logger.info(f"Received planning query: {request.query} for model: {request.model}")
+    try:
+        result = subprocess.run(
+            [
+                "claude", "--print", "--dangerously-skip-permissions",
+                "--output-format", "json",
+                "--mcp-config", "/home/appuser/sandbox/.mcp.json",
+                "--model", request.model,
+                "--system-prompt", PLAN_SYSTEM_PROMPT,
+                "--", request.query],
+            cwd="/home/appuser/sandbox",
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env={
+                **os.environ,
+                "CLAUDE_CONFIG_DIR": "/home/appuser",
+                "HOME": "/home/appuser",
+                "ANTHROPIC_API_KEY": DYNAMIC_AGENT_KEY,
+            }
+        )
+
+        logger.info(f"stdout: {result.stdout!r}")
+        logger.info(f"stderr: {result.stderr!r}")
+        logger.info(f"returncode: {result.returncode}")
+
+        if result.returncode != 0:
+            logger.error(f"Claude Code exited with error: {result.stderr}")
+            return {"error": result.stderr}
+
+        try:
+            parsed = json.loads(result.stdout)
+            if parsed.get("is_error"):
+                return {"error": parsed.get("result", "Unknown error")}
+            return {"response": parsed.get("result", "")}
+        except json.JSONDecodeError:
             return {"response": result.stdout.strip()}
 
     except subprocess.TimeoutExpired:
