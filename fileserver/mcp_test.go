@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -145,6 +146,40 @@ func TestMCPHandlers(t *testing.T) {
 		// os.OpenRoot should naturally prevent this
 		if rr.Code == http.StatusOK {
 			t.Error("Security Breach: Successfully read file outside of rootDir!")
+		}
+	})
+
+	t.Run("Read: Missing file_path returns 400", func(t *testing.T) {
+		// No path query parameter provided at all
+		req := newAuthRequest("GET", "/read", nil)
+		rr := httptest.NewRecorder()
+		handleRead(rootDir, token)(rr, req)
+
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("Expected 400 Bad Request for missing file_path, got %d", rr.Code)
+		}
+	})
+
+	t.Run("Read: Null byte in file_path returns 400", func(t *testing.T) {
+		// path value contains a null byte (URL-encoded as %00)
+		req := newAuthRequest("GET", "/read?path=evil%00file", nil)
+		rr := httptest.NewRecorder()
+		handleRead(rootDir, token)(rr, req)
+
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("Expected 400 Bad Request for null byte in file_path, got %d", rr.Code)
+		}
+	})
+
+	t.Run("Read: Oversized file_path returns 400", func(t *testing.T) {
+		// path value is 4097 bytes, which exceeds the 4096-byte limit
+		longPath := strings.Repeat("a", 4097)
+		req := newAuthRequest("GET", "/read?path="+longPath, nil)
+		rr := httptest.NewRecorder()
+		handleRead(rootDir, token)(rr, req)
+
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("Expected 400 Bad Request for oversized file_path, got %d", rr.Code)
 		}
 	})
 }
