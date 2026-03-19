@@ -429,4 +429,98 @@ func TestMCPHandlers(t *testing.T) {
 			t.Error("Security breach: path traversal succeeded in append handler")
 		}
 	})
+
+	// ── Mkdir tests ───────────────────────────────────────────────────────────
+
+	t.Run("Mkdir: creates directory successfully", func(t *testing.T) {
+		req := newAuthRequest("POST", "/mkdir?path=newdir", nil)
+		rr := httptest.NewRecorder()
+		handleMkdir(rootDir, token)(rr, req)
+
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("Expected 201 Created, got %d: %s", rr.Code, rr.Body.String())
+		}
+
+		info, err := os.Stat(filepath.Join(tempDir, "newdir"))
+		if err != nil {
+			t.Fatalf("Directory does not exist on disk: %v", err)
+		}
+		if !info.IsDir() {
+			t.Errorf("Expected a directory, got a file")
+		}
+	})
+
+	t.Run("Mkdir: conflict when directory already exists", func(t *testing.T) {
+		// Create directory first
+		os.Mkdir(filepath.Join(tempDir, "existing_dir"), 0755)
+
+		req := newAuthRequest("POST", "/mkdir?path=existing_dir", nil)
+		rr := httptest.NewRecorder()
+		handleMkdir(rootDir, token)(rr, req)
+
+		if rr.Code != http.StatusConflict {
+			t.Errorf("Expected 409 Conflict for duplicate directory, got %d", rr.Code)
+		}
+	})
+
+	t.Run("Mkdir: missing path returns 400", func(t *testing.T) {
+		req := newAuthRequest("POST", "/mkdir", nil)
+		rr := httptest.NewRecorder()
+		handleMkdir(rootDir, token)(rr, req)
+
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("Expected 400 Bad Request for missing path, got %d", rr.Code)
+		}
+	})
+
+	t.Run("Mkdir: path traversal rejected", func(t *testing.T) {
+		req := newAuthRequest("POST", "/mkdir?path=../escaped_dir", nil)
+		rr := httptest.NewRecorder()
+		handleMkdir(rootDir, token)(rr, req)
+
+		if rr.Code == http.StatusCreated {
+			t.Error("Security breach: path traversal succeeded in mkdir handler")
+		}
+	})
+
+	t.Run("Mkdir: unauthorized request rejected", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/mkdir?path=unauth_dir", nil)
+		// No Authorization header
+		rr := httptest.NewRecorder()
+		handleMkdir(rootDir, token)(rr, req)
+
+		if rr.Code != http.StatusUnauthorized {
+			t.Errorf("Expected 401 Unauthorized, got %d", rr.Code)
+		}
+	})
+
+	t.Run("Mkdir: created directory is visible in list", func(t *testing.T) {
+		// Create a new directory via the handler
+		req := newAuthRequest("POST", "/mkdir?path=listed_dir", nil)
+		rr := httptest.NewRecorder()
+		handleMkdir(rootDir, token)(rr, req)
+
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("Mkdir failed: %d", rr.Code)
+		}
+
+		// Verify it appears in /list output
+		req2 := newAuthRequest("GET", "/list", nil)
+		rr2 := httptest.NewRecorder()
+		handleList(rootDir, token)(rr2, req2)
+
+		var resp map[string]interface{}
+		json.Unmarshal(rr2.Body.Bytes(), &resp)
+
+		files := resp["files"].([]interface{})
+		found := false
+		for _, f := range files {
+			if f.(string) == "listed_dir/" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("Newly created directory 'listed_dir/' not found in list output: %v", files)
+		}
+	})
 }

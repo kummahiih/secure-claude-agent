@@ -341,6 +341,38 @@ func handleReplace(rootDir *os.Root, token string) http.HandlerFunc {
 	}
 }
 
+// handleMkdir creates a new directory inside the workspace jail.
+// POST /mkdir?path=<dir_path>
+// Returns 201 Created on success, 409 Conflict if it already exists.
+func handleMkdir(rootDir *os.Root, token string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !verifyToken(r, token) {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		targetPath := r.URL.Query().Get("path")
+		if targetPath == "" {
+			http.Error(w, "Bad Request: path is required", http.StatusBadRequest)
+			return
+		}
+
+		err := rootDir.Mkdir(targetPath, 0755)
+		if err != nil {
+			if os.IsExist(err) {
+				http.Error(w, "Directory already exists", http.StatusConflict)
+				return
+			}
+			log.Printf("MKDIR_ERROR: %v", err)
+			http.Error(w, "Failed to create directory", http.StatusBadRequest)
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		log.Printf("DIR_CREATED: %s", targetPath)
+	}
+}
+
 // handleAppend appends content to an existing (or new) file.
 // POST /append  body: {"path":"...","content":"..."}
 // Returns: {"bytes_written": N}
@@ -413,6 +445,9 @@ func setupRouter(rootDir *os.Root, token string) *http.ServeMux {
 
 	// append to file
 	mux.HandleFunc("/append", handleAppend(rootDir, token))
+
+	// create directory
+	mux.HandleFunc("/mkdir", handleMkdir(rootDir, token))
 
 	return mux
 }

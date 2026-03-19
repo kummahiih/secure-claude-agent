@@ -349,3 +349,41 @@ async def test_append_file_connection_failure(mock_post):
     mock_post.side_effect = Exception("Connection refused")
     with pytest.raises(Exception, match="Connection refused"):
         await _dispatch("append_file", {"path": "test.txt", "content": "data"})
+
+
+# --- _dispatch: create_directory ---
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_create_directory_success(mock_post):
+    mock_post.return_value.status_code = 201
+    result = await _dispatch("create_directory", {"path": "mydir"})
+    assert result == "Directory created"
+    args, _ = mock_post.call_args
+    assert "mydir" in args[0]
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_create_directory_already_exists(mock_post):
+    mock_post.return_value.status_code = 409
+    mock_post.return_value.text = "Directory already exists"
+    with pytest.raises(FileExistsError, match="already exists"):
+        await _dispatch("create_directory", {"path": "existing_dir"})
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_create_directory_bad_request(mock_post):
+    mock_post.return_value.status_code = 400
+    mock_post.return_value.text = "Bad Request: path is required"
+    with pytest.raises(RuntimeError, match="400"):
+        await _dispatch("create_directory", {"path": ""})
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_create_directory_connection_failure(mock_post):
+    mock_post.side_effect = Exception("Connection refused")
+    with pytest.raises(Exception, match="Connection refused"):
+        await _dispatch("create_directory", {"path": "somedir"})

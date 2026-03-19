@@ -113,6 +113,17 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["path", "content"]
             }
         ),
+        types.Tool(
+            name="create_directory",
+            description="Creates a new directory in the workspace.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path for the new directory"}
+                },
+                "required": ["path"]
+            }
+        ),
     ]
 
 
@@ -237,6 +248,18 @@ async def _dispatch(name: str, arguments: dict) -> str:
         if response.status_code == 200:
             bytes_written = response.json().get("bytes_written", 0)
             return str(bytes_written)
+        else:
+            raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
+
+    elif name == "create_directory":
+        response = requests.post(
+            f"{MCP_SERVER_URL}/mkdir?path={arguments['path']}",
+            headers=HEADERS, verify=VERIFY, timeout=10
+        )
+        if response.status_code == 201:
+            return "Directory created"
+        elif response.status_code == 409:
+            raise FileExistsError(f"Directory already exists: {arguments['path']}")
         else:
             raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
 

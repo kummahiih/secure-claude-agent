@@ -94,6 +94,17 @@
             },
             "required": ["path", "content"]
           }
+        },
+        {
+          "name": "create_directory",
+          "description": "Creates a new directory in the workspace.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": {"type": "string", "description": "Path for the new directory"}
+            },
+            "required": ["path"]
+          }
         }
       ]
     },
