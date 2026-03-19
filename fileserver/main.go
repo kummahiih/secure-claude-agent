@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -190,6 +192,201 @@ func handleList(rootDir *os.Root, token string) http.HandlerFunc {
 	}
 }
 
+// handleGrep searches all files in the workspace for lines matching a regexp pattern.
+// POST /grep  body: {"pattern":"<regexp>", "max_results": 100}
+// Returns: [{"file":"...","line_number":N,"line":"..."}]
+func handleGrep(rootDir *os.Root, token string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !verifyToken(r, token) {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		var req struct {
+			Pattern    string `json:"pattern"`
+			MaxResults int    `json:"max_results"`
+		}
+		req.MaxResults = 100 // default before decode
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+			return
+		}
+
+		if req.Pattern == "" {
+			http.Error(w, "Bad Request: pattern is required", http.StatusBadRequest)
+			return
+		}
+
+		if req.MaxResults <= 0 {
+			req.MaxResults = 100
+		}
+
+		re, err := regexp.Compile(req.Pattern)
+		if err != nil {
+			http.Error(w, "Bad Request: invalid pattern", http.StatusBadRequest)
+			return
+		}
+
+		type Match struct {
+			File       string `json:"file"`
+			LineNumber int    `json:"line_number"`
+			Line       string `json:"line"`
+		}
+
+		matches := []Match{}
+
+		fs.WalkDir(rootDir.FS(), ".", func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			if len(matches) >= req.MaxResults {
+				return nil
+			}
+
+			f, err := rootDir.Open(path)
+			if err != nil {
+				return nil
+			}
+			defer f.Close()
+
+			scanner := bufio.NewScanner(f)
+			lineNum := 0
+			for scanner.Scan() {
+				lineNum++
+				line := scanner.Text()
+				if re.MatchString(line) {
+					matches = append(matches, Match{
+						File:       path,
+						LineNumber: lineNum,
+						Line:       line,
+					})
+					if len(matches) >= req.MaxResults {
+						break
+					}
+				}
+			}
+			return nil
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(matches)
+	}
+}
+
+// handleReplace replaces all occurrences of old_string with new_string in the given file.
+// POST /replace  body: {"path":"...","old_string":"...","new_string":"..."}
+// Returns: {"replacements_made": N}  — fails 422 if N == 0.
+func handleReplace(rootDir *os.Root, token string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !verifyToken(r, token) {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		var req struct {
+			Path      string `json:"path"`
+			OldString string `json:"old_string"`
+			NewString string `json:"new_string"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+			return
+		}
+
+		if req.Path == "" {
+			http.Error(w, "Bad Request: path is required", http.StatusBadRequest)
+			return
+		}
+
+		f, err := rootDir.Open(req.Path)
+		if err != nil {
+			http.Error(w, "File not found", http.StatusNotFound)
+			return
+		}
+		data, err := io.ReadAll(f)
+		f.Close()
+		if err != nil {
+			http.Error(w, "Error reading file", http.StatusInternalServerError)
+			return
+		}
+
+		original := string(data)
+		replacements := strings.Count(original, req.OldString)
+
+		if replacements == 0 {
+			http.Error(w, "Unprocessable Entity: old_string not found in file", http.StatusUnprocessableEntity)
+			return
+		}
+
+		updated := strings.ReplaceAll(original, req.OldString, req.NewString)
+
+		wf, err := rootDir.OpenFile(req.Path, os.O_WRONLY|os.O_TRUNC, 0644)
+		if err != nil {
+			http.Error(w, "Error opening file for writing", http.StatusInternalServerError)
+			return
+		}
+		defer wf.Close()
+
+		if _, err = wf.WriteString(updated); err != nil {
+			http.Error(w, "Error writing file", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]int{"replacements_made": replacements})
+	}
+}
+
+// handleAppend appends content to an existing (or new) file.
+// POST /append  body: {"path":"...","content":"..."}
+// Returns: {"bytes_written": N}
+func handleAppend(rootDir *os.Root, token string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !verifyToken(r, token) {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		var req struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+			return
+		}
+
+		if req.Path == "" {
+			http.Error(w, "Bad Request: path is required", http.StatusBadRequest)
+			return
+		}
+
+		f, err := rootDir.OpenFile(req.Path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+		if err != nil {
+			log.Printf("APPEND_ERROR: %v", err)
+			http.Error(w, "Could not open file for appending", http.StatusInternalServerError)
+			return
+		}
+		defer f.Close()
+
+		n, err := f.WriteString(req.Content)
+		if err != nil {
+			http.Error(w, "Error appending to file", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]int{"bytes_written": n})
+		log.Printf("FILE_APPENDED: %s (%d bytes)", req.Path, n)
+	}
+}
+
 // setupRouter isolates the routing logic so it can be tested independently
 func setupRouter(rootDir *os.Root, token string) *http.ServeMux {
 	mux := http.NewServeMux()
@@ -207,6 +404,15 @@ func setupRouter(rootDir *os.Root, token string) *http.ServeMux {
 
 	// list files
 	mux.HandleFunc("/list", handleList(rootDir, token))
+
+	// grep across all files
+	mux.HandleFunc("/grep", handleGrep(rootDir, token))
+
+	// replace string in file
+	mux.HandleFunc("/replace", handleReplace(rootDir, token))
+
+	// append to file
+	mux.HandleFunc("/append", handleAppend(rootDir, token))
 
 	return mux
 }
