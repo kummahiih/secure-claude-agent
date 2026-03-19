@@ -17,7 +17,7 @@ subprocess.run(
      "--model", request.model,
      "--system-prompt", SYSTEM_PROMPT,
      "--", request.query],
-    timeout=300,
+    timeout=600,
     env={..., "ANTHROPIC_API_KEY": DYNAMIC_AGENT_KEY}
 )
 ```
