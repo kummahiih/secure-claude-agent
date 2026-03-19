@@ -197,3 +197,155 @@ async def test_call_tool_unknown(mock_get=None):
     result = await call_tool("nonexistent_tool", {})
     assert result.isError is True
     assert "Unknown tool" in result.content[0].text
+
+
+# --- _dispatch: grep_files ---
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_grep_files_success(mock_post):
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = [
+        {"file": "main.go", "line_number": 42, "line": "func handleGrep("},
+        {"file": "README.md", "line_number": 5, "line": "grep example here"},
+    ]
+    result = await _dispatch("grep_files", {"pattern": "grep"})
+    assert "main.go:42: func handleGrep(" in result
+    assert "README.md:5: grep example here" in result
+    _, kwargs = mock_post.call_args
+    assert kwargs["json"]["pattern"] == "grep"
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_grep_files_with_max_results(mock_post):
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = []
+    result = await _dispatch("grep_files", {"pattern": "foo", "max_results": 10})
+    assert result == "(no matches)"
+    _, kwargs = mock_post.call_args
+    assert kwargs["json"]["max_results"] == 10
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_grep_files_no_matches(mock_post):
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = []
+    result = await _dispatch("grep_files", {"pattern": "zzznomatch"})
+    assert result == "(no matches)"
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_grep_files_server_error(mock_post):
+    mock_post.return_value.status_code = 400
+    mock_post.return_value.text = "invalid pattern"
+    with pytest.raises(RuntimeError, match="400"):
+        await _dispatch("grep_files", {"pattern": "["})
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_grep_files_connection_failure(mock_post):
+    mock_post.side_effect = Exception("Connection refused")
+    with pytest.raises(Exception, match="Connection refused"):
+        await _dispatch("grep_files", {"pattern": "test"})
+
+
+# --- _dispatch: replace_in_file ---
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_replace_in_file_success(mock_post):
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = {"replacements_made": 3}
+    result = await _dispatch("replace_in_file", {
+        "path": "test.txt",
+        "old_string": "foo",
+        "new_string": "bar",
+    })
+    assert result == "3"
+    _, kwargs = mock_post.call_args
+    assert kwargs["json"] == {"path": "test.txt", "old_string": "foo", "new_string": "bar"}
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_replace_in_file_not_found(mock_post):
+    mock_post.return_value.status_code = 404
+    mock_post.return_value.text = "File not found"
+    with pytest.raises(FileNotFoundError):
+        await _dispatch("replace_in_file", {
+            "path": "missing.txt",
+            "old_string": "foo",
+            "new_string": "bar",
+        })
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_replace_in_file_old_string_not_found(mock_post):
+    mock_post.return_value.status_code = 422
+    mock_post.return_value.text = "old_string not found in file"
+    with pytest.raises(ValueError, match="old_string not found"):
+        await _dispatch("replace_in_file", {
+            "path": "test.txt",
+            "old_string": "zzznomatch",
+            "new_string": "bar",
+        })
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_replace_in_file_server_error(mock_post):
+    mock_post.return_value.status_code = 500
+    mock_post.return_value.text = "internal error"
+    with pytest.raises(RuntimeError, match="500"):
+        await _dispatch("replace_in_file", {
+            "path": "test.txt",
+            "old_string": "foo",
+            "new_string": "bar",
+        })
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_replace_in_file_connection_failure(mock_post):
+    mock_post.side_effect = Exception("Connection refused")
+    with pytest.raises(Exception, match="Connection refused"):
+        await _dispatch("replace_in_file", {
+            "path": "test.txt",
+            "old_string": "foo",
+            "new_string": "bar",
+        })
+
+
+# --- _dispatch: append_file ---
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_append_file_success(mock_post):
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = {"bytes_written": 11}
+    result = await _dispatch("append_file", {"path": "test.txt", "content": "hello world"})
+    assert result == "11"
+    _, kwargs = mock_post.call_args
+    assert kwargs["json"] == {"path": "test.txt", "content": "hello world"}
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_append_file_server_error(mock_post):
+    mock_post.return_value.status_code = 500
+    mock_post.return_value.text = "disk full"
+    with pytest.raises(RuntimeError, match="500"):
+        await _dispatch("append_file", {"path": "test.txt", "content": "data"})
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_append_file_connection_failure(mock_post):
+    mock_post.side_effect = Exception("Connection refused")
+    with pytest.raises(Exception, match="Connection refused"):
+        await _dispatch("append_file", {"path": "test.txt", "content": "data"})

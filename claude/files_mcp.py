@@ -76,6 +76,43 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["path"]
             }
         ),
+        types.Tool(
+            name="grep_files",
+            description="Search all files in the workspace for lines matching a regexp pattern. Returns results as 'file:lineno: line' strings.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "Regular expression pattern to search for"},
+                    "max_results": {"type": "integer", "description": "Maximum number of matching lines to return (default 100)"}
+                },
+                "required": ["pattern"]
+            }
+        ),
+        types.Tool(
+            name="replace_in_file",
+            description="Replace all occurrences of old_string with new_string in a file. Returns the number of replacements made.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the file"},
+                    "old_string": {"type": "string", "description": "String to search for"},
+                    "new_string": {"type": "string", "description": "String to replace with"}
+                },
+                "required": ["path", "old_string", "new_string"]
+            }
+        ),
+        types.Tool(
+            name="append_file",
+            description="Appends content to an existing (or new) file. Returns the number of bytes written.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the file"},
+                    "content": {"type": "string", "description": "Content to append"}
+                },
+                "required": ["path", "content"]
+            }
+        ),
     ]
 
 
@@ -154,6 +191,54 @@ async def _dispatch(name: str, arguments: dict) -> str:
             return "File deleted"
         else:
             raise RuntimeError(response.text)
+
+    elif name == "grep_files":
+        payload = {"pattern": arguments["pattern"]}
+        if "max_results" in arguments:
+            payload["max_results"] = arguments["max_results"]
+        response = requests.post(
+            f"{MCP_SERVER_URL}/grep",
+            json=payload,
+            headers=HEADERS, verify=VERIFY, timeout=30
+        )
+        if response.status_code == 200:
+            matches = response.json()
+            lines = [f"{m['file']}:{m['line_number']}: {m['line']}" for m in matches]
+            return "\n".join(lines) if lines else "(no matches)"
+        else:
+            raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
+
+    elif name == "replace_in_file":
+        response = requests.post(
+            f"{MCP_SERVER_URL}/replace",
+            json={
+                "path": arguments["path"],
+                "old_string": arguments["old_string"],
+                "new_string": arguments["new_string"],
+            },
+            headers=HEADERS, verify=VERIFY, timeout=10
+        )
+        if response.status_code == 200:
+            replacements_made = response.json().get("replacements_made", 0)
+            return str(replacements_made)
+        elif response.status_code == 404:
+            raise FileNotFoundError("File not found or access denied by OS jail.")
+        elif response.status_code == 422:
+            raise ValueError("old_string not found in file.")
+        else:
+            raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
+
+    elif name == "append_file":
+        response = requests.post(
+            f"{MCP_SERVER_URL}/append",
+            json={"path": arguments["path"], "content": arguments["content"]},
+            headers=HEADERS, verify=VERIFY, timeout=10
+        )
+        if response.status_code == 200:
+            bytes_written = response.json().get("bytes_written", 0)
+            return str(bytes_written)
+        else:
+            raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
 
     else:
         raise ValueError(f"Unknown tool {name}")
