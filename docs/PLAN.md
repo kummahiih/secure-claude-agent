@@ -22,6 +22,7 @@ For overall project phases and risk register, see
 - Baseline commit floor
 - 25 git tool tests
 - `grep_files`, `replace_in_file`, and `append_file` tools added to fileserver MCP (context-lighter file editing and search)
+- `create_directory` tool added to fileserver MCP
 - `docs/mcp-tools.json` added as a reference copy of all MCP tool schemas (readable via docs MCP)
 
 ### Phase 2.5 — Planning MCP Wrapper
@@ -30,23 +31,28 @@ For overall project phases and risk register, see
 - System prompt: plan-aware (/ask checks plan_current), API contract protection
 - 28 MCP wrapper tests
 
----
+### Phase 3 — Tester MCP Wrapper
 
-## Phase 3: Test Runner MCP Tool
-
-- [ ] Add `conftest.py` with autouse network-blocking fixture
-- [ ] Ensure pytest and go test can run against this repo's code in isolation
+- tester_mcp.py: stdio wrapper inside claude-server (2 tools: run_tests, get_test_results)
+- 13 MCP wrapper tests covering success, auth, conflict, errors, connection failures
+- Registered in .mcp.json build artifact alongside fileserver, git, docs, planner
+- TESTER_SERVER_URL added to runenv.py
+- test.sh updated: unit tests only (no security scans — those run in parent test.sh with network)
+- Dummy env var defaults added so tests run in network-isolated tester container
 
 ---
 
 ## Phase 4: Close the Loop
 
+- [ ] Update system prompt to instruct agent to run tests after code changes
+- [ ] Add test-gate: agent should call run_tests + get_test_results before plan_complete
 - [ ] End-to-end test: plan → execute all tasks → tests pass → committed
-- [ ] Handle test failures triggering re-plan
+- [ ] Handle test failures triggering re-plan or retry
 - [ ] Handle blocked tasks
 
 ---
 
 ## Phase 5: Hardening
 
-
+- [ ] Add `conftest.py` with autouse network-blocking fixture
+- [ ] Ensure all tests use mocks — no real service calls even if env vars are set

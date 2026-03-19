@@ -57,13 +57,14 @@ would false-positive.
 ## MCP Config as Build Artifact
 
 `.mcp.json` is baked into the Docker image at build time. The agent cannot modify
-its own tool registrations at runtime.
+its own tool registrations at runtime. Five MCP servers are registered: fileserver,
+git, docs, planner, and tester.
 
 ---
 
 ## Fileserver MCP Tools
 
-The fileserver MCP exposes 8 tools over stdio → HTTPS REST → Go fileserver:
+The fileserver MCP exposes 9 tools over stdio → HTTPS REST → Go fileserver:
 
 | Tool | Purpose |
 | :--- | :--- |
@@ -75,6 +76,35 @@ The fileserver MCP exposes 8 tools over stdio → HTTPS REST → Go fileserver:
 | grep_files | Regex search across all files; returns `file:lineno: line` matches |
 | replace_in_file | Replace all occurrences of a string in a file |
 | append_file | Append content to a file |
+| create_directory | Create a new directory |
+
+---
+
+## Tester MCP Tools
+
+The tester MCP exposes 2 tools over stdio → HTTPS REST → tester-server:
+
+| Tool | Purpose |
+| :--- | :--- |
+| run_tests | Start an async test run (executes /workspace/test.sh). Returns 409 if already running. |
+| get_test_results | Get last test result as JSON (status, exit_code, timestamp, output) |
+
+The tester-server runs tests as direct subprocesses — no Docker socket required.
+The workspace is mounted read-only so tests cannot modify source code.
+
+---
+
+## Environment Variables (runenv.py)
+
+| Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| MCP_SERVER_URL | https://mcp-server:8443 | Fileserver REST endpoint |
+| PLAN_SERVER_URL | https://plan-server:8443 | Plan-server REST endpoint |
+| TESTER_SERVER_URL | https://tester-server:8443 | Tester-server REST endpoint |
+| MCP_API_TOKEN | (required) | Bearer token for internal services |
+| CLAUDE_API_TOKEN | (required) | Bearer token for ingress auth |
+| DYNAMIC_AGENT_KEY | (required) | Ephemeral API key for LiteLLM proxy |
+| ANTHROPIC_BASE_URL | (required) | LiteLLM proxy URL |
 
 `docs/mcp-tools.json` is a reference copy of all MCP tool schemas, readable via
 `read_doc` from the docs MCP tool.
