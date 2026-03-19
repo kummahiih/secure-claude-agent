@@ -28,7 +28,7 @@ secure-claude-agent/
 
 | Tool Set | Tools | Transport | Purpose |
 | :--- | :--- | :--- | :--- |
-| **fileserver** | read_workspace_file, list_files, create_file, write_file, delete_file | stdio → HTTPS REST | File operations in /workspace via Go REST server |
+| **fileserver** | read_workspace_file, list_files, create_file, write_file, delete_file, grep_files, replace_in_file, append_file | stdio → HTTPS REST | File operations in /workspace via Go REST server |
 | **git** | git_status, git_diff, git_add, git_commit, git_log, git_reset_soft | stdio → subprocess | Git operations with hook prevention and history protection |
 | **docs** | list_docs, read_doc | stdio → local fs | Read-only access to project documentation |
 | **planner** | plan_current, plan_list, plan_complete, plan_block, plan_create, plan_update_task | stdio → HTTPS REST | Task planning and progress tracking |
@@ -51,6 +51,7 @@ cd fileserver && go test ./...
 
 - [docs/CONTEXT.md](docs/CONTEXT.md) — Architecture, security model, implementation details
 - [docs/PLAN.md](docs/PLAN.md) — Development roadmap and current phase
+- [docs/mcp-tools.json](docs/mcp-tools.json) — Reference copy of all MCP tool schemas (readable via the docs MCP tool)
 
 ## Part of Secure Claude
 

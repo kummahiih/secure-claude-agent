@@ -47,4 +47,5 @@ For overall project phases and risk register, see
 
 ## Phase 5: Hardening
 
-- [ ] `append_file` and `replace_in_file` tools (context-lighter file editing)
+- [x] `grep_files`, `replace_in_file`, and `append_file` tools added to fileserver MCP (context-lighter file editing and search)
+- [x] `docs/mcp-tools.json` added as a reference copy of all MCP tool schemas (readable via docs MCP)

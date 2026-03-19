@@ -58,3 +58,23 @@ would false-positive.
 
 `.mcp.json` is baked into the Docker image at build time. The agent cannot modify
 its own tool registrations at runtime.
+
+---
+
+## Fileserver MCP Tools
+
+The fileserver MCP exposes 8 tools over stdio → HTTPS REST → Go fileserver:
+
+| Tool | Purpose |
+| :--- | :--- |
+| list_files | Recursively list all files in /workspace |
+| read_workspace_file | Read a file |
+| create_file | Create a new empty file |
+| write_file | Overwrite entire file contents |
+| delete_file | Remove a file |
+| grep_files | Regex search across all files; returns `file:lineno: line` matches |
+| replace_in_file | Replace all occurrences of a string in a file |
+| append_file | Append content to a file |
+
+`docs/mcp-tools.json` is a reference copy of all MCP tool schemas, readable via
+`read_doc` from the docs MCP tool.
