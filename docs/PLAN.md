@@ -21,6 +21,8 @@ For overall project phases and risk register, see
 - 3-layer git hook prevention (/dev/null shadow, separated gitdir, core.hooksPath)
 - Baseline commit floor
 - 25 git tool tests
+- `grep_files`, `replace_in_file`, and `append_file` tools added to fileserver MCP (context-lighter file editing and search)
+- `docs/mcp-tools.json` added as a reference copy of all MCP tool schemas (readable via docs MCP)
 
 ### Phase 2.5 — Planning MCP Wrapper
 
@@ -47,5 +49,4 @@ For overall project phases and risk register, see
 
 ## Phase 5: Hardening
 
-- [x] `grep_files`, `replace_in_file`, and `append_file` tools added to fileserver MCP (context-lighter file editing and search)
-- [x] `docs/mcp-tools.json` added as a reference copy of all MCP tool schemas (readable via docs MCP)
+
