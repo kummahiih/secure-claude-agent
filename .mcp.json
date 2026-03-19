@@ -122,6 +122,29 @@
       "type": "stdio",
       "command": "python",
       "args": ["/app/plan_mcp.py"]
+    },
+    "tester": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["/app/tester_mcp.py"],
+      "tools": [
+        {
+          "name": "run_tests",
+          "description": "Starts an async test run against the current workspace. Returns immediately with status 'started'. Poll get_test_results to check outcome.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          }
+        },
+        {
+          "name": "get_test_results",
+          "description": "Returns the result of the most recent test run as JSON with fields: status (pass/fail/running/pending), exit_code, timestamp, output.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          }
+        }
+      ]
     }
   }
 }

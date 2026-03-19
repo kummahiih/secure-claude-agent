@@ -54,6 +54,7 @@ Rules:
 # Environment variables injected by Docker Compose / run.sh
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "https://mcp-server:8443")
 PLAN_SERVER_URL = os.environ.get("PLAN_SERVER_URL", "https://plan-server:8443")
+TESTER_SERVER_URL = os.environ.get("TESTER_SERVER_URL", "https://tester-server:8443")
 
 MCP_API_TOKEN = os.getenv("MCP_API_TOKEN")
 if not MCP_API_TOKEN:
