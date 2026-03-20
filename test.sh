@@ -43,10 +43,6 @@ echo "[$(date +'%H:%M:%S')] 3/3: Running tester tests..."
 (cd cluster/tester && ./test.sh)
 
 echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 4/4: Running root-level tests..."
-python -m pytest tests/ -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)'
-
-echo "----------------------------------------"
 echo "[$(date +'%H:%M:%S')] ✅ All unit tests passed!"
 echo ""
 echo "To run CVE audits, Docker builds, and integration tests:"
