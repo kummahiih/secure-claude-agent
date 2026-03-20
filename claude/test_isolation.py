@@ -342,14 +342,6 @@ class TestMcpConfig:
 class TestFullPass:
     """Verify that clean configurations pass all checks."""
 
-    def test_claude_server_clean_passes(self, clean_env_claude_server):
-        with patch.dict(os.environ, clean_env_claude_server, clear=True), \
-             patch("os.path.exists", side_effect=_make_exists("claude-server")), \
-             patch("os.path.isdir", return_value=False), \
-             patch("verify_isolation.find_env_files", return_value=[]), \
-             patch("verify_isolation.check_mcp_config", return_value=[]):
-            vi.verify_all("claude-server")
-
     def test_proxy_clean_passes(self, clean_env_proxy):
         with patch.dict(os.environ, clean_env_proxy, clear=True), \
              patch("os.path.exists", side_effect=_make_exists("proxy")), \

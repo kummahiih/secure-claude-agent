@@ -85,12 +85,15 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
 
         if result.returncode != 0:
             logger.error(f"Claude Code exited with error: {result.stderr}")
+            _check_upstream_auth_error(result.stderr)
             return {"error": result.stderr}
 
         try:
             parsed = json.loads(result.stdout)
             if parsed.get("is_error"):
-                return {"error": parsed.get("result", "Unknown error")}
+                error_text = parsed.get("result", "Unknown error")
+                _check_upstream_auth_error(error_text)
+                return {"error": error_text}
             return {"response": parsed.get("result", "")}
         except json.JSONDecodeError:
             # fallback in case output is plain text
@@ -99,6 +102,8 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
     except subprocess.TimeoutExpired:
         logger.error("Claude Code timed out.")
         return {"error": "Agent timed out."}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Agent execution failed: {e}")
         return {"error": str(e)}
@@ -135,12 +140,15 @@ async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
 
         if result.returncode != 0:
             logger.error(f"Claude Code exited with error: {result.stderr}")
+            _check_upstream_auth_error(result.stderr)
             return {"error": result.stderr}
 
         try:
             parsed = json.loads(result.stdout)
             if parsed.get("is_error"):
-                return {"error": parsed.get("result", "Unknown error")}
+                error_text = parsed.get("result", "Unknown error")
+                _check_upstream_auth_error(error_text)
+                return {"error": error_text}
             return {"response": parsed.get("result", "")}
         except json.JSONDecodeError:
             return {"response": result.stdout.strip()}
@@ -148,6 +156,8 @@ async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
     except subprocess.TimeoutExpired:
         logger.error("Claude Code timed out.")
         return {"error": "Agent timed out."}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Agent execution failed: {e}")
         return {"error": str(e)}

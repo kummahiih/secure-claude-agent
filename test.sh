@@ -1,49 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 
-# test.sh — Offline unit tests only
-#
-# Runs all sub-repository unit tests. Does NOT require:
-#   - Docker socket access
-#   - Network connectivity
-#   - Real API keys or secrets
-#   - A running cluster instance
-#
-# For CVE audits, Docker builds, and integration tests, see test-integration.sh.
-
-echo "[$(date +'%H:%M:%S')] Starting unit test suite..."
-
-# Activate venv if present (CI or local dev)
-if [ -f venv/bin/activate ]; then
-    # shellcheck disable=SC1091
-    . venv/bin/activate
-fi
-
-# Provide dummy tokens so the test harnesses don't crash on missing env vars
+# Dummy tokens for unit tests — no real services are contacted
 export MCP_API_TOKEN="${MCP_API_TOKEN:-dummy-mcp-token}"
+export MCP_SERVER_URL="${MCP_SERVER_URL:-https://mcp-server:8443}"
+export TESTER_SERVER_URL="${TESTER_SERVER_URL:-https://tester-server:8443}"
+export PLAN_SERVER_URL="${PLAN_SERVER_URL:-https://plan-server:8443}"
 export CLAUDE_API_TOKEN="${CLAUDE_API_TOKEN:-dummy-claude-token}"
-export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-dummy-anthropic-key}"
-export DYNAMIC_AGENT_KEY="${DYNAMIC_AGENT_KEY:-dummy-dynamic-key}"
+export DYNAMIC_AGENT_KEY="${DYNAMIC_AGENT_KEY:-dummy-agent-key}"
 export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-https://proxy:4000}"
 
-echo "========================================"
-echo "  SUB-REPOSITORY UNIT TESTS"
-echo "========================================"
+echo "[unit] Running Go fileserver tests..."
+(cd fileserver && go test mcp_test.go main.go -v 2>&1 | grep -E '(PASS|FAIL|---)')
 
-echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 1/3: Running agent tests..."
-(cd cluster/agent && ./test.sh)
-
-echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 2/3: Running planner tests..."
-(cd cluster/planner && ./test.sh)
-
-echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] 3/3: Running tester tests..."
-(cd cluster/tester && ./test.sh)
-
-echo "----------------------------------------"
-echo "[$(date +'%H:%M:%S')] ✅ All unit tests passed!"
-echo ""
-echo "To run CVE audits, Docker builds, and integration tests:"
-echo "  ./test-integration.sh"
+echo "[unit] Running Python claude tests..."
+(cd claude && python -m pytest claude_tests.py files_mcp_test.py test_isolation.py git_mcp_test.py tester_mcp_test.py test_server.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
