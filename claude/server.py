@@ -12,6 +12,16 @@ from verify_isolation import verify_all
 
 logger = logging.getLogger(__name__)
 
+
+def _check_upstream_auth_error(text: str) -> None:
+    """Raise HTTPException 502 if text contains upstream authentication error markers."""
+    if 'OAuth token has expired' in text or 'authentication_error' in text:
+        raise HTTPException(
+            status_code=502,
+            detail='Upstream API authentication failure \u2014 please refresh your ANTHROPIC_API_KEY.',
+        )
+
+
 app = FastAPI(title="Secure Claude Code Server")
 security = HTTPBearer()
 
