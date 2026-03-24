@@ -126,6 +126,8 @@ REQUIRED_PATHS = {
         "/app/server.py",
         "/app/files_mcp.py",
         "/app/verify_isolation.py",
+        "/app/prompts",                        # System prompts (root-owned, read-only)
+        "/home/appuser/.claude/commands",       # Slash commands (root-owned, read-only)
         "/home/appuser/sandbox/.mcp.json",  # MCP config baked into image
     ],
     "mcp-server": [
@@ -229,6 +231,52 @@ def check_mcp_config(config_path: str) -> list[str]:
         errors.append(f"MCP config invalid: {config_path}: {e}")
     return errors
 
+def check_prompt_immutability() -> list[str]:
+    """
+    Verify prompt files and their directories are read-only and root-owned.
+
+    Both /app/prompts/ (system prompts) and /home/appuser/.claude/commands/
+    (slash commands) must be:
+    - Owned by root (UID 0) — prevents appuser from deleting/creating entries
+    - Not writable by owner — prevents modification even if ownership check
+      is somehow bypassed
+
+    This blocks the agent from modifying its own system prompts or injecting
+    new slash commands at runtime.
+    """
+    import stat
+
+    errors = []
+    prompt_dirs = ["/app/prompts", "/home/appuser/.claude/commands"]
+
+    for dirpath in prompt_dirs:
+        if not os.path.isdir(dirpath):
+            errors.append(f"Prompt directory missing: {dirpath}")
+            continue
+
+        # Check directory ownership and permissions
+        st = os.stat(dirpath)
+        if st.st_uid != 0:
+            errors.append(f"Prompt directory not owned by root: {dirpath} (uid={st.st_uid})")
+        if st.st_mode & stat.S_IWUSR:
+            errors.append(f"Prompt directory is writable: {dirpath}")
+        if st.st_mode & stat.S_IWGRP:
+            errors.append(f"Prompt directory is group-writable: {dirpath}")
+        if st.st_mode & stat.S_IWOTH:
+            errors.append(f"Prompt directory is world-writable: {dirpath}")
+
+        # Check each file inside
+        for name in os.listdir(dirpath):
+            fpath = os.path.join(dirpath, name)
+            if not os.path.isfile(fpath):
+                continue
+            fst = os.stat(fpath)
+            if fst.st_uid != 0:
+                errors.append(f"Prompt file not owned by root: {fpath} (uid={fst.st_uid})")
+            if fst.st_mode & stat.S_IWUSR:
+                errors.append(f"Prompt file is writable: {fpath}")
+
+    return errors
 
 # --- Main verification ---
 
@@ -288,6 +336,13 @@ def verify_all(role: str) -> None:
         mcp_errors = check_mcp_config("/home/appuser/sandbox/.mcp.json")
         violations.extend(mcp_errors)
 
+    # 9. Prompt immutability (claude-server only)
+    #    System prompts and slash commands must be root-owned and read-only
+    #    to prevent the agent from modifying its own instructions at runtime.
+    if role == "claude-server":
+        prompt_errors = check_prompt_immutability()
+        violations.extend(prompt_errors)
+
     # Report
     if violations:
         logger.error(f"=== ISOLATION CHECK FAILED for role={role} ===")
@@ -312,6 +367,7 @@ def _count_checks(role: str) -> int:
         count += 1  # .git leak check
     if role == "claude-server":
         count += 1  # MCP config validation
+        count += 1  # Prompt immutability
     return count
 
 

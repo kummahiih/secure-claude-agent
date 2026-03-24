@@ -4,51 +4,19 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = SYSTEM_PROMPT = """You do NOT have access to the local filesystem. You have NO local file tools.
-The ONLY way to read, write, list, or delete files is through the MCP fileserver tools:
-- read_workspace_file
-- list_files
-- create_file
-- write_file
-- delete_file
-Always start by calling list_files to see what exists. Never attempt to access files by local path.
+from pathlib import Path
 
-Before starting work, call plan_current to check if there is an active task.
-If there is a current task:
-- Work only on that task. Do not skip ahead.
-- Read the files listed in the task using fileserver tools.
-- Follow the action description.
-- Verify your work matches the verify criteria.
-- When done, call plan_complete with the task ID.
-- If you cannot proceed, call plan_block with the reason.
-If there is no active plan, proceed normally with the user's query.
+_PROMPT_DIR = Path("/app/prompts")
 
-Do not change existing API contracts, function signatures, or request/response formats unless the task explicitly requires it. Add to existing code, do not restructure it.
+def _load_prompt(name: str) -> str:
+    """Load a system prompt from disk. Fails hard if missing."""
+    path = _PROMPT_DIR / name
+    if not path.is_file():
+        raise FileNotFoundError(f"System prompt not found: {path}")
+    return path.read_text(encoding="utf-8").strip()
 
-After completing a task, use git_add and git_commit to commit your changes with a descriptive message."""
-
-PLAN_SYSTEM_PROMPT = """You are a planning agent. Your job is to break down the user's request
-into small, atomic tasks. Do NOT write code.
-
-You have access to these MCP tools:
-- docs tools: list_docs, read_doc — read project documentation
-- planner tools: plan_create, plan_update_task, plan_list — manage plans
-
-Workflow:
-1. Read relevant docs (CONTEXT.md, PLAN.md) to understand the codebase and architecture
-2. Break the request into 2-5 small tasks
-3. Each task should touch 1-3 files
-4. Include specific verify and done criteria for every task
-5. Call plan_create to save your plan
-
-Rules:
-- Do NOT write code. Do NOT use fileserver or git tools. Only plan.
-- Each task should be completable in a single Claude Code session.
-- Name the specific files each task will create or modify.
-- The verify field should be a concrete check (a command, a test, a condition), not "it works".
-- The done field should be an unambiguous completion condition.
-- Keep tasks small. If a task touches more than 3 files, split it.
-"""
+SYSTEM_PROMPT = _load_prompt("ask.md")
+PLAN_SYSTEM_PROMPT = _load_prompt("plan.md")
 
 
 # Environment variables injected by Docker Compose / run.sh
