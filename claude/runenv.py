@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 from pathlib import Path
 
-_PROMPT_DIR = Path("/app/prompts")
+_PROMPT_DIR = Path(os.environ.get("PROMPT_SYSTEM_DIR", "/app/prompts"))
 
 def _load_prompt(name: str) -> str:
     """Load a system prompt from disk. Fails hard if missing."""

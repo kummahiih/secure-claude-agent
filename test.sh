@@ -13,5 +13,9 @@ export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-https://proxy:4000}"
 echo "[unit] Running Go fileserver tests..."
 (cd fileserver && go test mcp_test.go main.go -v 2>&1 | grep -E '(PASS|FAIL|---)')
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export PROMPT_SYSTEM_DIR="${SCRIPT_DIR}/prompts/system"
+export PROMPT_COMMANDS_DIR="${SCRIPT_DIR}/prompts/commands"
+
 echo "[unit] Running Python claude tests..."
 (cd claude && python -m pytest claude_tests.py files_mcp_test.py test_isolation.py git_mcp_test.py tester_mcp_test.py test_server.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')

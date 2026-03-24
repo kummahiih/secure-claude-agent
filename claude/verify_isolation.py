@@ -231,23 +231,31 @@ def check_mcp_config(config_path: str) -> list[str]:
         errors.append(f"MCP config invalid: {config_path}: {e}")
     return errors
 
-def check_prompt_immutability() -> list[str]:
+PROMPT_DIRS_DEFAULT = ["/app/prompts", "/home/appuser/.claude/commands"]
+
+
+def check_prompt_immutability(prompt_dirs: list[str] | None = None) -> list[str]:
     """
     Verify prompt files and their directories are read-only and root-owned.
 
-    Both /app/prompts/ (system prompts) and /home/appuser/.claude/commands/
-    (slash commands) must be:
+    Both the system prompts dir and slash commands dir must be:
     - Owned by root (UID 0) — prevents appuser from deleting/creating entries
     - Not writable by owner — prevents modification even if ownership check
       is somehow bypassed
 
     This blocks the agent from modifying its own system prompts or injecting
     new slash commands at runtime.
+
+    Args:
+        prompt_dirs: Directories to check. Defaults to PROMPT_DIRS_DEFAULT
+                     (Docker paths). Tests pass custom temp directories.
     """
     import stat
 
+    if prompt_dirs is None:
+        prompt_dirs = PROMPT_DIRS_DEFAULT
+
     errors = []
-    prompt_dirs = ["/app/prompts", "/home/appuser/.claude/commands"]
 
     for dirpath in prompt_dirs:
         if not os.path.isdir(dirpath):
