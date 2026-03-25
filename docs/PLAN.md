@@ -40,15 +40,16 @@ For overall project phases and risk register, see
 - test.sh updated: unit tests only (no security scans — those run in parent test.sh with network)
 - Dummy env var defaults added so tests run in network-isolated tester container
 
----
+### Phase 4 ✅ Close the Loop
 
-## Phase 4: Close the Loop
+Wired the full plan-execute-test-commit cycle into the agent system prompt.
 
-- [X] Update system prompt to instruct agent to run tests after code changes
-- [X] Add test-gate: agent should call run_tests + get_test_results before plan_complete
-- [X] End-to-end test: plan → execute all tasks → tests pass → committed
-- [X] Handle test failures triggering re-plan or retry
-- [X] Handle blocked tasks
+- Test gate: `run_tests` → poll `get_test_results` → pass required before `plan_complete`
+- Retry loop: up to 3 fix attempts; `plan_block` with failure summary after 3rd failure
+- Commit gate: `git_add` + `git_commit` before `plan_complete` when code changed
+- Blocked task handling: agent outputs block reason and stops — no rework attempted
+- End-to-end mock tests covering success path and block-after-retries path
+- Full workflow documented in [WORKFLOW.md](WORKFLOW.md)
 
 ---
 

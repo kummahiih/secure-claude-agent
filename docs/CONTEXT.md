@@ -24,8 +24,8 @@ subprocess.run(
 
 ### System prompt behavior
 
-- `/plan` endpoint: Claude reads docs, creates plan via plan_create. No code execution.
-- `/ask` endpoint: Claude calls plan_current first. If a task exists, works on it, then calls plan_complete. If no plan, proceeds normally.
+- `/plan` endpoint: Claude reads docs, creates plan via `plan_create`. No code execution.
+- `/ask` endpoint: full plan-execute-test-commit loop — see [WORKFLOW.md](WORKFLOW.md).
 - API contract protection: system prompt instructs Claude not to change existing interfaces unless explicitly required.
 
 ---
