@@ -30,6 +30,43 @@ subprocess.run(
 
 ---
 
+## Prompts
+
+All prompt content lives in `cluster/agent/prompts/` and is baked into the
+claude-server image at build time (no runtime bind-mount).
+
+### System prompts (`prompts/system/`)
+
+Copied to `/app/prompts/` inside the image. Read by `runenv.py` at startup and
+held in memory as `SYSTEM_PROMPT` / `PLAN_SYSTEM_PROMPT`. Passed to Claude Code
+via `--system-prompt <text>` in the subprocess call.
+
+| File | Variable | Endpoint | Purpose |
+| :--- | :--- | :--- | :--- |
+| ask.md | SYSTEM_PROMPT | POST /ask | Instructs Claude to execute tasks, follow the active plan, run tests, and commit |
+| plan.md | PLAN_SYSTEM_PROMPT | POST /plan | Instructs Claude to produce a plan only — no code execution |
+
+### Slash commands (`prompts/commands/`)
+
+Copied to `/home/appuser/.claude/commands/` inside the image. Discovered and
+invoked by Claude Code at runtime as `/command-name`.
+
+| File | Slash command | Purpose |
+| :--- | :--- | :--- |
+| architecture-doc.md | /architecture-doc | Generate an architecture document for the workspace |
+| make-presentation.md | /make-presentation | Generate a presentation outline |
+| threat-model.md | /threat-model | Generate a threat model for the workspace |
+
+### Editing conventions
+
+- Plain Markdown only — no shell variables, no template expansion.
+- Keep system prompts self-contained: Claude Code receives no other context about
+  the cluster from the prompt itself (it reads `docs/CONTEXT.md` via the docs MCP).
+- The directory tree inside the image is owned by root and mode 444/555 so the
+  agent cannot modify its own prompts at runtime.
+
+---
+
 ## Git Hook Prevention (3 layers)
 
 1. mcp-server: `/dev/null` shadow on `.git` — fileserver can't see git data
