@@ -12,6 +12,31 @@ from verify_isolation import verify_all
 
 logger = logging.getLogger(__name__)
 
+COMMANDS_DIR = "/home/appuser/.claude/commands"
+
+
+def _expand_slash_command(query: str) -> str:
+    """Expand a /command-name query into the contents of the matching .md file.
+
+    claude --print does not honour user-defined slash commands (those only work
+    in the interactive REPL).  When the caller sends "/architecture-doc" we
+    load the corresponding prompt file and use that as the actual query so the
+    agent receives the full instruction set.
+
+    Queries that don't start with '/' are returned unchanged.
+    """
+    if not query.startswith("/"):
+        return query
+    # Strip the leading slash and any trailing whitespace/args
+    name = query[1:].split()[0]
+    cmd_path = os.path.join(COMMANDS_DIR, f"{name}.md")
+    if os.path.isfile(cmd_path):
+        logger.info(f"Expanding slash command /{name} from {cmd_path}")
+        with open(cmd_path, encoding="utf-8") as fh:
+            return fh.read()
+    logger.warning(f"Unknown slash command: /{name} (no file at {cmd_path})")
+    return query
+
 
 def _check_upstream_auth_error(text: str) -> None:
     """Raise HTTPException 502 if text contains upstream authentication error markers."""
@@ -57,6 +82,7 @@ async def health_check():
 async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
     """External endpoint routed through Caddy, secured with Bearer token."""
     logger.info(f"Received authenticated query: {request.query} for model: {request.model}")
+    query = _expand_slash_command(request.query)
     try:
         result = subprocess.run(
             [
@@ -65,7 +91,7 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
                 "--mcp-config", "/home/appuser/sandbox/.mcp.json",
                 "--model", request.model,
                 "--system-prompt", SYSTEM_PROMPT,
-                "--", request.query],
+                "--", query],
             cwd="/home/appuser/sandbox",
             capture_output=True,
             text=True,
@@ -113,6 +139,7 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
 async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
     """Planning endpoint — Claude produces a plan without writing code."""
     logger.info(f"Received planning query: {request.query} for model: {request.model}")
+    query = _expand_slash_command(request.query)
     try:
         result = subprocess.run(
             [
@@ -121,7 +148,7 @@ async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
                 "--mcp-config", "/home/appuser/sandbox/.mcp.json",
                 "--model", request.model,
                 "--system-prompt", PLAN_SYSTEM_PROMPT,
-                "--", request.query],
+                "--", query],
             cwd="/home/appuser/sandbox",
             capture_output=True,
             text=True,
