@@ -102,3 +102,50 @@ def test_health_check():
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+# --- End-to-End Mock Tests ---
+
+def test_plan_loop_success():
+    headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = (
+        "Calling plan_current... task t1 returned.\n"
+        "Working on task...\n"
+        "Calling run_tests... status: pass.\n"
+        "Calling git_commit... committed.\n"
+        "Calling plan_complete... done."
+    )
+
+    with patch("server.subprocess.run", return_value=mock_result) as mock_run:
+        response = client.post("/ask", headers=headers, json={"model": "claude-sonnet-4-6", "query": "Run the plan loop"})
+        assert response.status_code == 200
+        json_response = response.json()
+        assert "error" not in json_response
+        call_args = mock_run.call_args
+        assert "--system-prompt" in call_args[0][0]
+        idx = call_args[0][0].index("--system-prompt")
+        assert call_args[0][0][idx + 1] == SYSTEM_PROMPT
+
+
+def test_plan_loop_block_after_retries():
+    headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = (
+        "Calling plan_current... task t2 returned.\n"
+        "Attempt 1: run_tests failed.\n"
+        "Attempt 2: run_tests failed.\n"
+        "Attempt 3: run_tests failed.\n"
+        "Calling plan_block... blocked due to repeated test failures."
+    )
+
+    with patch("server.subprocess.run", return_value=mock_result) as mock_run:
+        response = client.post("/ask", headers=headers, json={"model": "claude-sonnet-4-6", "query": "Run the plan loop with failures"})
+        assert response.status_code == 200
+        json_response = response.json()
+        assert "error" not in json_response
+        call_args = mock_run.call_args
+        assert "--system-prompt" in call_args[0][0]
+        idx = call_args[0][0].index("--system-prompt")
+        assert call_args[0][0][idx + 1] == SYSTEM_PROMPT
