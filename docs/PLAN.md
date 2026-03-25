@@ -46,9 +46,9 @@ For overall project phases and risk register, see
 
 - [X] Update system prompt to instruct agent to run tests after code changes
 - [X] Add test-gate: agent should call run_tests + get_test_results before plan_complete
-- [ ] End-to-end test: plan → execute all tasks → tests pass → committed
-- [ ] Handle test failures triggering re-plan or retry
-- [ ] Handle blocked tasks
+- [X] End-to-end test: plan → execute all tasks → tests pass → committed
+- [X] Handle test failures triggering re-plan or retry
+- [X] Handle blocked tasks
 
 ---
 
