@@ -35,6 +35,112 @@ if not GIT_DIR or not GIT_WORK_TREE:
     )
     sys.exit(1)
 
+
+def parse_gitmodules(workspace: str = "/workspace") -> list[dict]:
+    """Parse .gitmodules and return a list of submodule dicts.
+
+    Args:
+        workspace: Path to the workspace root (where .gitmodules lives).
+                   Defaults to '/workspace' (the production mount point).
+
+    Returns:
+        List of dicts with 'name' and 'path' keys.  'path' is normalised
+        with os.path.normpath.  Returns [] if .gitmodules is absent or
+        cannot be read.
+    """
+    gitmodules_path = os.path.join(workspace, ".gitmodules")
+    if not os.path.exists(gitmodules_path):
+        return []
+
+    submodules: list[dict] = []
+    current_name: str | None = None
+    current_path: str | None = None
+
+    try:
+        with open(gitmodules_path) as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if line.startswith('[submodule "') and line.endswith('"]'):
+                    # Flush previous entry
+                    if current_name is not None and current_path is not None:
+                        submodules.append(
+                            {
+                                "name": current_name,
+                                "path": os.path.normpath(current_path),
+                            }
+                        )
+                    current_name = line[len('[submodule "'):-2]
+                    current_path = None
+                elif "=" in line and current_name is not None:
+                    key, _, value = line.partition("=")
+                    if key.strip() == "path":
+                        current_path = value.strip()
+        # Flush last entry
+        if current_name is not None and current_path is not None:
+            submodules.append(
+                {
+                    "name": current_name,
+                    "path": os.path.normpath(current_path),
+                }
+            )
+    except OSError:
+        return []
+
+    return submodules
+
+
+def git_env_for(
+    file_path: str | None = None,
+    submodule_path: str | None = None,
+) -> tuple[dict, str, str]:
+    """Return (env_vars, git_dir, work_tree) for the correct repo.
+
+    Determines whether to use the root repo or a submodule repo based on
+    the provided arguments.
+
+    Priority:
+    1. If ``submodule_path`` is given, use that submodule directly.
+    2. Else if ``file_path`` is given, auto-detect the owning submodule
+       by checking which submodule path is a prefix of ``file_path``.
+    3. Otherwise, fall back to the root repo.
+
+    Args:
+        file_path: Path to a file relative to the workspace root.  Used to
+                   auto-detect which submodule owns it.
+        submodule_path: Explicit submodule path relative to the workspace
+                        root (e.g. ``'cluster/agent'``).
+
+    Returns:
+        Tuple of ``(env_vars, git_dir, work_tree)`` where:
+        - ``env_vars``  — copy of ``os.environ`` with ``GIT_DIR`` / ``GIT_WORK_TREE`` set
+        - ``git_dir``   — absolute path to the ``.git`` directory
+        - ``work_tree`` — absolute path to the working tree root
+    """
+    root_gitdir = GIT_DIR        # e.g. /gitdir
+    root_worktree = GIT_WORK_TREE  # e.g. /workspace
+
+    effective_submodule = submodule_path
+
+    if effective_submodule is None and file_path is not None:
+        submodules = parse_gitmodules(workspace=root_worktree)
+        norm_file = os.path.normpath(file_path)
+        for sub in submodules:
+            sub_prefix = sub["path"]
+            if norm_file == sub_prefix or norm_file.startswith(sub_prefix + os.sep):
+                effective_submodule = sub["path"]
+                break
+
+    if effective_submodule is not None:
+        git_dir = os.path.join(root_gitdir, "modules", effective_submodule)
+        work_tree = os.path.join(root_worktree, effective_submodule)
+    else:
+        git_dir = root_gitdir
+        work_tree = root_worktree
+
+    env = {**os.environ, "GIT_DIR": git_dir, "GIT_WORK_TREE": work_tree}
+    return env, git_dir, work_tree
+
+
 # Baseline commit for git_reset_soft floor enforcement.
 # Must be set ONCE at container startup (in entrypoint.sh) and passed as
 # GIT_BASELINE_COMMIT env var. This survives across Claude Code subprocess
@@ -64,6 +170,38 @@ else:
             print("No baseline commit (empty repo)", file=sys.stderr)
     except Exception as e:
         print(f"Warning: could not determine baseline commit: {e}", file=sys.stderr)
+
+# Per-submodule baseline commits, keyed by submodule path (relative to workspace).
+# Populated at startup so git_reset_soft can enforce a floor for submodule resets.
+SUBMODULE_BASELINE_COMMITS: dict[str, str] = {}
+
+for _sub in parse_gitmodules(workspace=GIT_WORK_TREE):
+    try:
+        _sub_env, _, _ = git_env_for(submodule_path=_sub["path"])
+        _sub_result = subprocess.run(
+            ["git", "-c", "core.hooksPath=/dev/null", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=_sub_env,
+        )
+        if _sub_result.returncode == 0:
+            _sub_commit = _sub_result.stdout.strip()
+            SUBMODULE_BASELINE_COMMITS[_sub["path"]] = _sub_commit
+            print(
+                f"Submodule baseline ({_sub['path']}): {_sub_commit}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"Submodule {_sub['path']} has no commits yet — skipping baseline.",
+                file=sys.stderr,
+            )
+    except Exception as _sub_e:
+        print(
+            f"Warning: could not determine baseline for submodule {_sub['path']}: {_sub_e}",
+            file=sys.stderr,
+        )
 
 
 def _run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess:

@@ -432,3 +432,134 @@ class TestGitResetSoft:
         # count > 5 should be clamped to 5, then fail because not enough history
         result = git_mcp.git_reset_soft(count=100)
         assert result.isError is True
+
+class TestParseGitmodules:
+    def test_empty_workspace(self, tmp_path):
+        """Returns empty list when .gitmodules doesn't exist."""
+        result = git_mcp.parse_gitmodules(workspace=str(tmp_path))
+        assert result == []
+
+    def test_one_submodule(self, tmp_path):
+        """Parses a single submodule entry."""
+        (tmp_path / ".gitmodules").write_text(
+            '[submodule "mymod"]\n'
+            "\tpath = some/path\n"
+            "\turl = https://example.com/repo.git\n"
+        )
+        result = git_mcp.parse_gitmodules(workspace=str(tmp_path))
+        assert len(result) == 1
+        assert result[0]["name"] == "mymod"
+        assert result[0]["path"] == os.path.normpath("some/path")
+
+    def test_nested_submodule(self, tmp_path):
+        """Parses a deeply nested submodule path."""
+        (tmp_path / ".gitmodules").write_text(
+            '[submodule "a/b/c"]\n'
+            "\tpath = a/b/c\n"
+            "\turl = https://example.com/c.git\n"
+        )
+        result = git_mcp.parse_gitmodules(workspace=str(tmp_path))
+        assert len(result) == 1
+        assert result[0]["path"] == os.path.normpath("a/b/c")
+
+    def test_multiple_submodules(self, tmp_path):
+        """Parses multiple submodule entries in order."""
+        (tmp_path / ".gitmodules").write_text(
+            '[submodule "first"]\n'
+            "\tpath = sub/first\n"
+            "\turl = https://example.com/first.git\n"
+            '[submodule "second"]\n'
+            "\tpath = sub/second\n"
+            "\turl = https://example.com/second.git\n"
+        )
+        result = git_mcp.parse_gitmodules(workspace=str(tmp_path))
+        assert len(result) == 2
+        assert result[0]["name"] == "first"
+        assert result[0]["path"] == os.path.normpath("sub/first")
+        assert result[1]["name"] == "second"
+        assert result[1]["path"] == os.path.normpath("sub/second")
+
+    def test_path_normalised(self, tmp_path):
+        """Paths are normalised via os.path.normpath."""
+        (tmp_path / ".gitmodules").write_text(
+            '[submodule "x"]\n'
+            "\tpath = foo//bar\n"
+            "\turl = https://example.com/x.git\n"
+        )
+        result = git_mcp.parse_gitmodules(workspace=str(tmp_path))
+        assert result[0]["path"] == os.path.normpath("foo//bar")
+
+
+class TestGitEnvFor:
+    def test_no_args_returns_root(self):
+        """No arguments → returns root GIT_DIR and GIT_WORK_TREE."""
+        env, git_dir, work_tree = git_mcp.git_env_for()
+        assert git_dir == git_mcp.GIT_DIR
+        assert work_tree == git_mcp.GIT_WORK_TREE
+        assert env["GIT_DIR"] == git_mcp.GIT_DIR
+        assert env["GIT_WORK_TREE"] == git_mcp.GIT_WORK_TREE
+
+    def test_explicit_submodule_path(self):
+        """explicit submodule_path → returns submodule gitdir/worktree."""
+        env, git_dir, work_tree = git_mcp.git_env_for(submodule_path="sub/foo")
+        expected_gitdir = os.path.join(git_mcp.GIT_DIR, "modules", "sub/foo")
+        expected_worktree = os.path.join(git_mcp.GIT_WORK_TREE, "sub/foo")
+        assert git_dir == expected_gitdir
+        assert work_tree == expected_worktree
+        assert env["GIT_DIR"] == expected_gitdir
+        assert env["GIT_WORK_TREE"] == expected_worktree
+
+    def test_file_inside_submodule(self, tmp_path, monkeypatch):
+        """file_path inside a submodule → auto-detects the correct submodule."""
+        (tmp_path / ".gitmodules").write_text(
+            '[submodule "mymod"]\n'
+            "\tpath = mymod\n"
+            "\turl = https://example.com/mymod.git\n"
+        )
+        monkeypatch.setattr(git_mcp, "GIT_DIR", "/fake/gitdir")
+        monkeypatch.setattr(git_mcp, "GIT_WORK_TREE", str(tmp_path))
+
+        env, git_dir, work_tree = git_mcp.git_env_for(file_path="mymod/some/file.py")
+        assert git_dir == "/fake/gitdir/modules/mymod"
+        assert work_tree == str(tmp_path / "mymod")
+        assert env["GIT_DIR"] == git_dir
+        assert env["GIT_WORK_TREE"] == work_tree
+
+    def test_file_not_in_any_submodule(self, tmp_path, monkeypatch):
+        """file_path not in any submodule → falls back to root."""
+        (tmp_path / ".gitmodules").write_text(
+            '[submodule "mymod"]\n'
+            "\tpath = mymod\n"
+            "\turl = https://example.com/mymod.git\n"
+        )
+        monkeypatch.setattr(git_mcp, "GIT_DIR", "/fake/gitdir")
+        monkeypatch.setattr(git_mcp, "GIT_WORK_TREE", str(tmp_path))
+
+        env, git_dir, work_tree = git_mcp.git_env_for(file_path="other/file.py")
+        assert git_dir == "/fake/gitdir"
+        assert work_tree == str(tmp_path)
+
+    def test_submodule_path_takes_priority_over_file_path(self, tmp_path, monkeypatch):
+        """explicit submodule_path wins even when file_path is also provided."""
+        (tmp_path / ".gitmodules").write_text(
+            '[submodule "mymod"]\n'
+            "\tpath = mymod\n"
+            "\turl = https://example.com/mymod.git\n"
+        )
+        monkeypatch.setattr(git_mcp, "GIT_DIR", "/fake/gitdir")
+        monkeypatch.setattr(git_mcp, "GIT_WORK_TREE", str(tmp_path))
+
+        env, git_dir, work_tree = git_mcp.git_env_for(
+            file_path="other/file.py",
+            submodule_path="explicit/sub",
+        )
+        assert git_dir == "/fake/gitdir/modules/explicit/sub"
+        assert work_tree == str(tmp_path / "explicit" / "sub")
+
+    def test_env_vars_copied(self):
+        """env_vars dict contains GIT_DIR and GIT_WORK_TREE keys."""
+        env, git_dir, work_tree = git_mcp.git_env_for()
+        assert "GIT_DIR" in env
+        assert "GIT_WORK_TREE" in env
+        assert env["GIT_DIR"] == git_dir
+        assert env["GIT_WORK_TREE"] == work_tree
