@@ -23,7 +23,7 @@ Then read source by layer:
 - Any `caddy_entrypoint.sh` — startup checks for Caddy
 
 ### Layer 3: Agent Core
-- `claude/app.py` — FastAPI endpoints (/ask, /plan), subprocess invocation
+- `claude/server.py` — FastAPI endpoints (/ask, /plan), subprocess invocation
 - `claude/verify_isolation.py` — all 26 startup checks (document each one)
 - `prompts/system/ask.md` — system prompt for /ask
 - `prompts/system/plan.md` — system prompt for /plan

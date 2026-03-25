@@ -25,7 +25,7 @@ Then read source files in this order:
 - Any `*_wrapper.py` or `*_entrypoint.sh` — startup isolation checks
 
 ### Agent Runtime
-- `claude/app.py` — FastAPI server, request handling, subprocess invocation
+- `claude/server.py` — FastAPI server, request handling, subprocess invocation
 - `claude/verify_isolation.py` — startup isolation checks
 - `prompts/system/ask.md` and `prompts/system/plan.md` — system prompts
 - `.mcp.json` — MCP tool registration baked into the image
