@@ -563,3 +563,273 @@ class TestGitEnvFor:
         assert "GIT_WORK_TREE" in env
         assert env["GIT_DIR"] == git_dir
         assert env["GIT_WORK_TREE"] == work_tree
+
+
+# ---------------------------------------------------------------------------
+# New tests for submodule-aware git tool handlers (task t2/t3)
+# ---------------------------------------------------------------------------
+
+import os
+from unittest.mock import MagicMock, call, patch
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _mock_proc(returncode: int = 0, stdout: str = "", stderr: str = "") -> MagicMock:
+    """Return a MagicMock that looks like a CompletedProcess."""
+    m = MagicMock()
+    m.returncode = returncode
+    m.stdout = stdout
+    m.stderr = stderr
+    return m
+
+
+# ---------------------------------------------------------------------------
+# git_add: multi-repo guard
+# ---------------------------------------------------------------------------
+
+
+class TestGitAddMultiRepoGuard:
+    """git_add must reject paths that span more than one repository."""
+
+    def _make_gitmodules(self, tmp_path):
+        (tmp_path / ".gitmodules").write_text(
+            '[submodule "sub1"]\n'
+            "\tpath = sub1\n"
+            "\turl = https://example.com/sub1.git\n"
+            '[submodule "sub2"]\n'
+            "\tpath = sub2\n"
+            "\turl = https://example.com/sub2.git\n"
+        )
+
+    def test_paths_in_different_submodules_rejected(self, tmp_path, monkeypatch):
+        """Paths from sub1 and sub2 → error, subprocess never called for add."""
+        self._make_gitmodules(tmp_path)
+        monkeypatch.setattr(git_mcp, "GIT_DIR", "/fake/gitdir")
+        monkeypatch.setattr(git_mcp, "GIT_WORK_TREE", str(tmp_path))
+
+        with patch("subprocess.run") as mock_run:
+            result = git_mcp.git_add(paths=["sub1/a.py", "sub2/b.py"])
+
+        assert result.isError is True
+        assert "span multiple repositories" in result.content[0].text
+        # git add subprocess must NOT have been invoked
+        mock_run.assert_not_called()
+
+    def test_paths_in_same_submodule_accepted(self, tmp_path, monkeypatch):
+        """Two paths from the same submodule → add proceeds."""
+        self._make_gitmodules(tmp_path)
+        monkeypatch.setattr(git_mcp, "GIT_DIR", "/fake/gitdir")
+        monkeypatch.setattr(git_mcp, "GIT_WORK_TREE", str(tmp_path))
+
+        with patch("subprocess.run", return_value=_mock_proc()) as mock_run:
+            result = git_mcp.git_add(paths=["sub1/a.py", "sub1/b.py"])
+
+        assert result.isError is False
+        # subprocess.run should have been called exactly once (for git add)
+        assert mock_run.call_count == 1
+
+    def test_root_and_submodule_paths_rejected(self, tmp_path, monkeypatch):
+        """One root-repo file and one submodule file → span error."""
+        self._make_gitmodules(tmp_path)
+        monkeypatch.setattr(git_mcp, "GIT_DIR", "/fake/gitdir")
+        monkeypatch.setattr(git_mcp, "GIT_WORK_TREE", str(tmp_path))
+
+        with patch("subprocess.run") as mock_run:
+            result = git_mcp.git_add(paths=["root_file.py", "sub1/a.py"])
+
+        assert result.isError is True
+        assert "span multiple repositories" in result.content[0].text
+        mock_run.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# submodule_path routing: git_status / git_diff / git_log / git_commit
+# ---------------------------------------------------------------------------
+
+
+class TestSubmodulePathRouting:
+    """Tools should pass submodule GIT_DIR / GIT_WORK_TREE to subprocess."""
+
+    def setup_method(self):
+        self._orig_dir = git_mcp.GIT_DIR
+        self._orig_tree = git_mcp.GIT_WORK_TREE
+        git_mcp.GIT_DIR = "/gitdir"
+        git_mcp.GIT_WORK_TREE = "/workspace"
+
+    def teardown_method(self):
+        git_mcp.GIT_DIR = self._orig_dir
+        git_mcp.GIT_WORK_TREE = self._orig_tree
+
+    def _last_env(self, mock_run) -> dict:
+        """Return the env dict from the most recent subprocess.run call."""
+        return mock_run.call_args[1].get("env", mock_run.call_args[0])
+
+    def test_git_status_uses_submodule_env(self):
+        with patch("subprocess.run", return_value=_mock_proc(stdout="M foo.py")) as mock_run:
+            result = git_mcp.git_status(submodule_path="cluster/agent")
+
+        assert result.isError is False
+        env = self._last_env(mock_run)
+        assert env["GIT_DIR"] == "/gitdir/modules/cluster/agent"
+        assert env["GIT_WORK_TREE"] == "/workspace/cluster/agent"
+
+    def test_git_status_no_submodule_uses_root_env(self):
+        with patch("subprocess.run", return_value=_mock_proc()) as mock_run:
+            git_mcp.git_status()
+
+        env = self._last_env(mock_run)
+        assert env["GIT_DIR"] == "/gitdir"
+        assert env["GIT_WORK_TREE"] == "/workspace"
+
+    def test_git_diff_uses_submodule_env(self):
+        with patch("subprocess.run", return_value=_mock_proc(stdout="+line")) as mock_run:
+            result = git_mcp.git_diff(submodule_path="cluster/agent")
+
+        assert result.isError is False
+        env = self._last_env(mock_run)
+        assert env["GIT_DIR"] == "/gitdir/modules/cluster/agent"
+
+    def test_git_diff_staged_uses_submodule_env(self):
+        with patch("subprocess.run", return_value=_mock_proc(stdout="+line")) as mock_run:
+            git_mcp.git_diff(staged=True, submodule_path="cluster/agent")
+
+        # Verify --cached was passed
+        cmd = mock_run.call_args[0][0]
+        assert "--cached" in cmd
+        env = self._last_env(mock_run)
+        assert env["GIT_DIR"] == "/gitdir/modules/cluster/agent"
+
+    def test_git_log_uses_submodule_env(self):
+        with patch("subprocess.run", return_value=_mock_proc(stdout="abc1234 msg")) as mock_run:
+            result = git_mcp.git_log(submodule_path="cluster/agent")
+
+        assert result.isError is False
+        env = self._last_env(mock_run)
+        assert env["GIT_DIR"] == "/gitdir/modules/cluster/agent"
+
+    def test_git_commit_uses_submodule_env(self):
+        with patch("subprocess.run", return_value=_mock_proc(stdout="[main abc] msg")) as mock_run:
+            result = git_mcp.git_commit(
+                message="test commit", submodule_path="cluster/agent"
+            )
+
+        assert result.isError is False
+        env = self._last_env(mock_run)
+        assert env["GIT_DIR"] == "/gitdir/modules/cluster/agent"
+        assert env["GIT_WORK_TREE"] == "/workspace/cluster/agent"
+
+
+# ---------------------------------------------------------------------------
+# git_reset_soft: per-submodule baseline enforcement
+# ---------------------------------------------------------------------------
+
+
+class TestPerSubmoduleBaseline:
+    """git_reset_soft enforces a per-submodule baseline floor."""
+
+    def setup_method(self):
+        self._orig_dir = git_mcp.GIT_DIR
+        self._orig_tree = git_mcp.GIT_WORK_TREE
+        self._orig_baseline = git_mcp.BASELINE_COMMIT
+        self._orig_sub_baselines = dict(git_mcp.SUBMODULE_BASELINE_COMMITS)
+        git_mcp.GIT_DIR = "/gitdir"
+        git_mcp.GIT_WORK_TREE = "/workspace"
+
+    def teardown_method(self):
+        git_mcp.GIT_DIR = self._orig_dir
+        git_mcp.GIT_WORK_TREE = self._orig_tree
+        git_mcp.BASELINE_COMMIT = self._orig_baseline
+        git_mcp.SUBMODULE_BASELINE_COMMITS.clear()
+        git_mcp.SUBMODULE_BASELINE_COMMITS.update(self._orig_sub_baselines)
+
+    def test_reset_blocked_past_submodule_baseline(self):
+        """Resetting past the submodule baseline is rejected."""
+        baseline_sha = "aabbccddee00" * 3
+        older_sha = "1122334455ff" * 3
+
+        git_mcp.SUBMODULE_BASELINE_COMMITS["cluster/agent"] = baseline_sha
+
+        # rev-parse HEAD~1 → older_sha  (before baseline)
+        # merge-base --is-ancestor → returns 0 (older_sha IS ancestor of baseline → block)
+        side_effects = [
+            _mock_proc(returncode=0, stdout=older_sha + "\n"),   # rev-parse
+            _mock_proc(returncode=0),                            # merge-base (is ancestor)
+        ]
+
+        with patch("subprocess.run", side_effect=side_effects):
+            result = git_mcp.git_reset_soft(count=1, submodule_path="cluster/agent")
+
+        assert result.isError is True
+        assert "baseline" in result.content[0].text.lower()
+
+    def test_reset_to_submodule_baseline_allowed(self):
+        """Resetting exactly to the submodule baseline is allowed."""
+        baseline_sha = "aabbccddee00" * 3
+
+        git_mcp.SUBMODULE_BASELINE_COMMITS["cluster/agent"] = baseline_sha
+
+        # rev-parse HEAD~1 → baseline_sha  (equal to baseline → no ancestor check)
+        # then reset --soft → success
+        side_effects = [
+            _mock_proc(returncode=0, stdout=baseline_sha + "\n"),  # rev-parse
+            _mock_proc(returncode=0, stdout=""),                   # reset --soft
+        ]
+
+        with patch("subprocess.run", side_effect=side_effects):
+            result = git_mcp.git_reset_soft(count=1, submodule_path="cluster/agent")
+
+        assert result.isError is False
+        assert "Reset 1 commit" in result.content[0].text
+
+    def test_reset_no_submodule_baseline_blocked(self):
+        """If a submodule has no recorded baseline, reset is blocked."""
+        # SUBMODULE_BASELINE_COMMITS is empty for "cluster/agent"
+        git_mcp.SUBMODULE_BASELINE_COMMITS.clear()
+
+        with patch("subprocess.run"):
+            result = git_mcp.git_reset_soft(count=1, submodule_path="cluster/agent")
+
+        assert result.isError is True
+        assert "no baseline" in result.content[0].text.lower()
+
+    def test_reset_above_submodule_baseline_allowed(self):
+        """Resetting above the submodule baseline succeeds."""
+        baseline_sha = "aabbccddee00" * 3
+        agent_sha = "ffee99887766" * 3  # newer than baseline
+
+        git_mcp.SUBMODULE_BASELINE_COMMITS["cluster/agent"] = baseline_sha
+
+        # rev-parse → agent_sha  (not equal to baseline)
+        # merge-base --is-ancestor → returns 1 (agent_sha is NOT ancestor of baseline → allow)
+        # reset --soft → success
+        side_effects = [
+            _mock_proc(returncode=0, stdout=agent_sha + "\n"),  # rev-parse
+            _mock_proc(returncode=1),                           # merge-base (not ancestor)
+            _mock_proc(returncode=0, stdout=""),                # reset --soft
+        ]
+
+        with patch("subprocess.run", side_effect=side_effects):
+            result = git_mcp.git_reset_soft(count=1, submodule_path="cluster/agent")
+
+        assert result.isError is False
+
+    def test_reset_uses_root_baseline_when_no_submodule_path(self):
+        """Without submodule_path, root BASELINE_COMMIT is used."""
+        root_baseline = "deadbeef0000" * 3
+        git_mcp.BASELINE_COMMIT = root_baseline
+
+        # rev-parse → something older than baseline
+        older_sha = "00000000dead" * 3
+        side_effects = [
+            _mock_proc(returncode=0, stdout=older_sha + "\n"),  # rev-parse
+            _mock_proc(returncode=0),                           # merge-base (is ancestor)
+        ]
+
+        with patch("subprocess.run", side_effect=side_effects):
+            result = git_mcp.git_reset_soft(count=1)  # no submodule_path
+
+        assert result.isError is True
+        assert "baseline" in result.content[0].text.lower()
