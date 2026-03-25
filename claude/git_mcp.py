@@ -231,6 +231,23 @@ def _run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     )
 
 
+def _run_git_env(env: dict, *args: str, check: bool = False) -> subprocess.CompletedProcess:
+    """Run a git command with the provided environment.
+
+    Every call gets core.hooksPath=/dev/null.  The caller supplies the
+    full environment (including GIT_DIR / GIT_WORK_TREE) via ``env``.
+    """
+    cmd = ["git", "-c", "core.hooksPath=/dev/null", *args]
+    return subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=check,
+        env=env,
+    )
+
+
 def _ok(text: str) -> types.CallToolResult:
     """Return a successful tool result."""
     return types.CallToolResult(
@@ -250,10 +267,17 @@ def _err(text: str) -> types.CallToolResult:
 # --- Tool implementations ---
 
 
-def git_status() -> types.CallToolResult:
-    """Run git status."""
+def git_status(submodule_path: str | None = None) -> types.CallToolResult:
+    """Run git status.
+
+    Args:
+        submodule_path: Optional submodule path relative to workspace root
+                        (e.g. 'cluster/agent').  If omitted, operates on
+                        the root repository.
+    """
     try:
-        result = _run_git("status", "--short", check=False)
+        env, _git_dir, _work_tree = git_env_for(submodule_path=submodule_path)
+        result = _run_git_env(env, "status", "--short")
         output = result.stdout.strip()
         if result.returncode != 0:
             return _err(f"git status failed: {result.stderr.strip()}")
@@ -266,13 +290,20 @@ def git_status() -> types.CallToolResult:
         return _err(f"git status error: {e}")
 
 
-def git_diff(staged: bool = False) -> types.CallToolResult:
-    """Run git diff, optionally showing staged changes."""
+def git_diff(staged: bool = False, submodule_path: str | None = None) -> types.CallToolResult:
+    """Run git diff, optionally showing staged changes.
+
+    Args:
+        staged: If True, show staged (cached) changes.
+        submodule_path: Optional submodule path relative to workspace root.
+                        If omitted, operates on the root repository.
+    """
     try:
+        env, _git_dir, _work_tree = git_env_for(submodule_path=submodule_path)
         args = ["diff"]
         if staged:
             args.append("--cached")
-        result = _run_git(*args, check=False)
+        result = _run_git_env(env, *args)
         output = result.stdout.strip()
         if result.returncode != 0:
             return _err(f"git diff failed: {result.stderr.strip()}")
@@ -292,11 +323,48 @@ def git_add(paths: list[str]) -> types.CallToolResult:
     Args:
         paths: List of file paths relative to the worktree root.
                Use ["."] to stage everything.
+
+    All paths must belong to the same repository (root or a single
+    submodule).  If they span multiple repositories, an error is returned
+    and no files are staged.
     """
     if not paths:
         return _err("No paths provided to git add")
     try:
-        result = _run_git("add", "--", *paths, check=False)
+        # Determine the owning repo for every path and verify they are all
+        # in the same repository.
+        git_dirs: set[str] = set()
+        envs: list[tuple[dict, str, str]] = []
+        for p in paths:
+            env, git_dir, work_tree = git_env_for(file_path=p)
+            git_dirs.add(git_dir)
+            envs.append((env, git_dir, work_tree))
+
+        if len(git_dirs) > 1:
+            return _err(
+                "Error: git_add paths span multiple repositories; "
+                "stage each submodule separately."
+            )
+
+        env, git_dir, work_tree = envs[0]
+
+        # When operating on a submodule the user-supplied paths are relative
+        # to the workspace root.  Convert them to absolute paths so git
+        # resolves them correctly regardless of the process CWD.
+        root = os.path.normpath(GIT_WORK_TREE)
+        wt = os.path.normpath(work_tree)
+        if wt != root:
+            abs_paths: list[str] = []
+            for p in paths:
+                if p == ".":
+                    abs_paths.append(wt)
+                else:
+                    abs_paths.append(os.path.normpath(os.path.join(root, p)))
+            paths_to_stage = abs_paths
+        else:
+            paths_to_stage = paths
+
+        result = _run_git_env(env, "add", "--", *paths_to_stage)
         if result.returncode != 0:
             return _err(f"git add failed: {result.stderr.strip()}")
         return _ok(f"Staged: {', '.join(paths)}")
@@ -306,20 +374,23 @@ def git_add(paths: list[str]) -> types.CallToolResult:
         return _err(f"git add error: {e}")
 
 
-def git_commit(message: str) -> types.CallToolResult:
+def git_commit(message: str, submodule_path: str | None = None) -> types.CallToolResult:
     """Create a commit with the given message.
 
     Args:
         message: Commit message (required, non-empty).
+        submodule_path: Optional submodule path relative to workspace root.
+                        If omitted, commits to the root repository.
     """
     if not message or not message.strip():
         return _err("Commit message must not be empty")
     try:
-        result = _run_git(
+        env, _git_dir, _work_tree = git_env_for(submodule_path=submodule_path)
+        result = _run_git_env(
+            env,
             "commit",
             "-m", message.strip(),
             "--no-verify",  # Belt-and-suspenders: skip hooks even if hooksPath fails
-            check=False,
         )
         if result.returncode != 0:
             stderr = result.stderr.strip()
@@ -335,20 +406,23 @@ def git_commit(message: str) -> types.CallToolResult:
         return _err(f"git commit error: {e}")
 
 
-def git_log(max_count: int = 10) -> types.CallToolResult:
+def git_log(max_count: int = 10, submodule_path: str | None = None) -> types.CallToolResult:
     """Show recent commit log.
 
     Args:
         max_count: Number of commits to show (default 10, max 50).
+        submodule_path: Optional submodule path relative to workspace root.
+                        If omitted, shows log for the root repository.
     """
     max_count = min(max(1, max_count), 50)
     try:
-        result = _run_git(
+        env, _git_dir, _work_tree = git_env_for(submodule_path=submodule_path)
+        result = _run_git_env(
+            env,
             "log",
             f"--max-count={max_count}",
             "--oneline",
             "--no-decorate",
-            check=False,
         )
         if result.returncode != 0:
             stderr = result.stderr.strip()
@@ -366,7 +440,7 @@ def git_log(max_count: int = 10) -> types.CallToolResult:
         return _err(f"git log error: {e}")
 
 
-def git_reset_soft(count: int = 1) -> types.CallToolResult:
+def git_reset_soft(count: int = 1, submodule_path: str | None = None) -> types.CallToolResult:
     """Undo the last N commits, keeping changes staged.
 
     Enforces a baseline floor: cannot reset past the commit that existed
@@ -374,18 +448,26 @@ def git_reset_soft(count: int = 1) -> types.CallToolResult:
 
     Args:
         count: Number of commits to undo (default 1, max 5).
+        submodule_path: Optional submodule path relative to workspace root.
+                        If omitted, resets the root repository.
     """
     count = min(max(1, count), 5)
 
-    if BASELINE_COMMIT is None:
-        return _err("Cannot reset — no baseline commit (empty repo at startup)")
-
     try:
+        env, _git_dir, _work_tree = git_env_for(submodule_path=submodule_path)
+
+        # Select the correct baseline for the target repository.
+        if submodule_path is not None:
+            effective_key = os.path.normpath(submodule_path)
+            baseline = SUBMODULE_BASELINE_COMMITS.get(effective_key)
+        else:
+            baseline = BASELINE_COMMIT
+
+        if baseline is None:
+            return _err("Cannot reset — no baseline commit (empty repo at startup)")
+
         # Resolve what HEAD~count points to
-        target_result = _run_git(
-            "rev-parse", f"HEAD~{count}",
-            check=False,
-        )
+        target_result = _run_git_env(env, "rev-parse", f"HEAD~{count}")
         if target_result.returncode != 0:
             return _err(
                 f"Cannot reset {count} commits — not enough history. "
@@ -396,22 +478,21 @@ def git_reset_soft(count: int = 1) -> types.CallToolResult:
         # Enforce baseline floor: allow resetting TO the baseline but not past it.
         # If target equals baseline, that's fine — we're undoing only agent commits.
         # If target is a strict ancestor of baseline, we'd be erasing pre-existing history.
-        if target_commit != BASELINE_COMMIT:
+        if target_commit != baseline:
             # Check if target is an ancestor of baseline (i.e., older than baseline)
-            ancestor_check = _run_git(
-                "merge-base", "--is-ancestor", target_commit, BASELINE_COMMIT,
-                check=False,
+            ancestor_check = _run_git_env(
+                env, "merge-base", "--is-ancestor", target_commit, baseline
             )
             if ancestor_check.returncode == 0:
                 # target is strictly before baseline — block
                 return _err(
                     f"Cannot reset {count} commits — would go past the baseline commit "
-                    f"({BASELINE_COMMIT[:12]}). You can only undo commits created during "
+                    f"({baseline[:12]}). You can only undo commits created during "
                     f"this session."
                 )
 
         # Safe to reset
-        result = _run_git("reset", "--soft", f"HEAD~{count}", check=False)
+        result = _run_git_env(env, "reset", "--soft", f"HEAD~{count}")
         if result.returncode != 0:
             return _err(f"git reset failed: {result.stderr.strip()}")
 
@@ -436,7 +517,15 @@ TOOLS = [
         description="Show working tree status (short format). Returns list of changed files with status codes.",
         inputSchema={
             "type": "object",
-            "properties": {},
+            "properties": {
+                "submodule_path": {
+                    "type": "string",
+                    "description": (
+                        "Optional submodule path relative to workspace root "
+                        "(e.g. 'cluster/agent'). If omitted, operates on the root repository."
+                    ),
+                },
+            },
         },
     ),
     types.Tool(
@@ -449,6 +538,13 @@ TOOLS = [
                     "type": "boolean",
                     "description": "If true, show staged (cached) changes instead of unstaged.",
                     "default": False,
+                },
+                "submodule_path": {
+                    "type": "string",
+                    "description": (
+                        "Optional submodule path relative to workspace root "
+                        "(e.g. 'cluster/agent'). If omitted, operates on the root repository."
+                    ),
                 },
             },
         },
@@ -478,6 +574,13 @@ TOOLS = [
                     "type": "string",
                     "description": "Commit message.",
                 },
+                "submodule_path": {
+                    "type": "string",
+                    "description": (
+                        "Optional submodule path relative to workspace root "
+                        "(e.g. 'cluster/agent'). If omitted, commits to the root repository."
+                    ),
+                },
             },
             "required": ["message"],
         },
@@ -492,6 +595,13 @@ TOOLS = [
                     "type": "integer",
                     "description": "Number of commits to show (default 10, max 50).",
                     "default": 10,
+                },
+                "submodule_path": {
+                    "type": "string",
+                    "description": (
+                        "Optional submodule path relative to workspace root "
+                        "(e.g. 'cluster/agent'). If omitted, shows log for the root repository."
+                    ),
                 },
             },
         },
@@ -511,6 +621,13 @@ TOOLS = [
                     "description": "Number of commits to undo (default 1, max 5).",
                     "default": 1,
                 },
+                "submodule_path": {
+                    "type": "string",
+                    "description": (
+                        "Optional submodule path relative to workspace root "
+                        "(e.g. 'cluster/agent'). If omitted, resets the root repository."
+                    ),
+                },
             },
         },
     ),
@@ -528,17 +645,31 @@ async def handle_call_tool(
 ) -> types.CallToolResult:
     match name:
         case "git_status":
-            return git_status()
+            return git_status(
+                submodule_path=arguments.get("submodule_path"),
+            )
         case "git_diff":
-            return git_diff(staged=arguments.get("staged", False))
+            return git_diff(
+                staged=arguments.get("staged", False),
+                submodule_path=arguments.get("submodule_path"),
+            )
         case "git_add":
             return git_add(paths=arguments.get("paths", []))
         case "git_commit":
-            return git_commit(message=arguments.get("message", ""))
+            return git_commit(
+                message=arguments.get("message", ""),
+                submodule_path=arguments.get("submodule_path"),
+            )
         case "git_log":
-            return git_log(max_count=arguments.get("max_count", 10))
+            return git_log(
+                max_count=arguments.get("max_count", 10),
+                submodule_path=arguments.get("submodule_path"),
+            )
         case "git_reset_soft":
-            return git_reset_soft(count=arguments.get("count", 1))
+            return git_reset_soft(
+                count=arguments.get("count", 1),
+                submodule_path=arguments.get("submodule_path"),
+            )
         case _:
             return _err(f"Unknown tool: {name}")
 
