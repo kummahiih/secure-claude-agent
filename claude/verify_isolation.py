@@ -40,6 +40,8 @@ FORBIDDEN_ENV_VARS = {
     ],
     "mcp-server": [
         "ANTHROPIC_API_KEY",
+        "TESTER_API_TOKEN",       # tester-server token must not reach plan-server
+        "PLAN_API_TOKEN",         # plan-server token must not reach tester-server
     ],
     "plan-server": [
         "ANTHROPIC_API_KEY",
