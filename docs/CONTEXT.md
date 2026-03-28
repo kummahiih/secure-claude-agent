@@ -138,7 +138,9 @@ The workspace is mounted read-only so tests cannot modify source code.
 | MCP_SERVER_URL | https://mcp-server:8443 | Fileserver REST endpoint |
 | PLAN_SERVER_URL | https://plan-server:8443 | Plan-server REST endpoint |
 | TESTER_SERVER_URL | https://tester-server:8443 | Tester-server REST endpoint |
-| MCP_API_TOKEN | (required) | Bearer token for internal services |
+| MCP_API_TOKEN | (required) | Bearer token for mcp-server |
+| PLAN_API_TOKEN | (required) | Bearer token for plan-server |
+| TESTER_API_TOKEN | (required) | Bearer token for tester-server |
 | CLAUDE_API_TOKEN | (required) | Bearer token for ingress auth |
 | DYNAMIC_AGENT_KEY | (required) | Ephemeral API key for LiteLLM proxy |
 | ANTHROPIC_BASE_URL | (required) | LiteLLM proxy URL |
