@@ -98,8 +98,8 @@ async def test_create_file_success(mock_post):
     mock_post.return_value.status_code = 201
     result = await _dispatch("create_file", {"path": "new.txt"})
     assert result == "File created"
-    args, _ = mock_post.call_args
-    assert "new.txt" in args[0]
+    _, kwargs = mock_post.call_args
+    assert kwargs["params"]["path"] == "new.txt"
 
 
 @pytest.mark.asyncio
@@ -148,8 +148,8 @@ async def test_delete_file_success(mock_delete):
     mock_delete.return_value.status_code = 200
     result = await _dispatch("delete_file", {"path": "old.txt"})
     assert result == "File deleted"
-    args, _ = mock_delete.call_args
-    assert "old.txt" in args[0]
+    _, kwargs = mock_delete.call_args
+    assert kwargs["params"]["path"] == "old.txt"
 
 
 @pytest.mark.asyncio
@@ -359,8 +359,8 @@ async def test_create_directory_success(mock_post):
     mock_post.return_value.status_code = 201
     result = await _dispatch("create_directory", {"path": "mydir"})
     assert result == "Directory created"
-    args, _ = mock_post.call_args
-    assert "mydir" in args[0]
+    _, kwargs = mock_post.call_args
+    assert kwargs["params"]["path"] == "mydir"
 
 
 @pytest.mark.asyncio

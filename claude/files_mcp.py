@@ -149,7 +149,7 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
 async def _dispatch(name: str, arguments: dict) -> str:
     if name == "read_workspace_file":
         response = requests.get(
-            f"{MCP_SERVER_URL}/read?path={arguments['file_path']}",
+            f"{MCP_SERVER_URL}/read", params={"path": arguments["file_path"]},
             headers=HEADERS, verify=VERIFY, timeout=10
         )
         if response.status_code == 200:
@@ -174,7 +174,7 @@ async def _dispatch(name: str, arguments: dict) -> str:
 
     elif name == "create_file":
         response = requests.post(
-            f"{MCP_SERVER_URL}/create?path={arguments['path']}",
+            f"{MCP_SERVER_URL}/create", params={"path": arguments["path"]},
             headers=HEADERS, verify=VERIFY, timeout=10
         )
         if response.status_code == 201:
@@ -195,7 +195,7 @@ async def _dispatch(name: str, arguments: dict) -> str:
 
     elif name == "delete_file":
         response = requests.delete(
-            f"{MCP_SERVER_URL}/remove?path={arguments['path']}",
+            f"{MCP_SERVER_URL}/remove", params={"path": arguments["path"]},
             headers=HEADERS, verify=VERIFY, timeout=10
         )
         if response.status_code == 200:
@@ -253,7 +253,7 @@ async def _dispatch(name: str, arguments: dict) -> str:
 
     elif name == "create_directory":
         response = requests.post(
-            f"{MCP_SERVER_URL}/mkdir?path={arguments['path']}",
+            f"{MCP_SERVER_URL}/mkdir", params={"path": arguments["path"]},
             headers=HEADERS, verify=VERIFY, timeout=10
         )
         if response.status_code == 201:
