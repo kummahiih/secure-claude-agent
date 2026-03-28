@@ -24,7 +24,7 @@ _SECRET_RE = re.compile("|".join(re.escape(t) for t in _SECRET_TOKENS)) if _SECR
 
 def _redact_secrets(text: str) -> str:
     """Replace known secret token values in text with [REDACTED]."""
-    if _SECRET_RE is None:
+    if _SECRET_RE is None or not isinstance(text, str):
         return text
     return _SECRET_RE.sub("[REDACTED]", text)
 
@@ -128,13 +128,13 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
             }
         )
 
-        logger.info(f"stdout: {result.stdout!r}")
-        logger.info(f"stderr: {result.stderr!r}")
-        logger.info(f"returncode: {result.returncode}")
-        logger.info(f"result: {result!r}")
+        logger.debug(f"stdout: {_redact_secrets(result.stdout)!r}")
+        logger.debug(f"stderr: {_redact_secrets(result.stderr)!r}")
+        logger.debug(f"returncode: {result.returncode}")
+        logger.info(f"Claude Code completed: returncode={result.returncode} stdout_bytes={len(result.stdout)} stderr_bytes={len(result.stderr)}")
 
         if result.returncode != 0:
-            logger.error(f"Claude Code exited with error: {result.stderr}")
+            logger.error(f"Claude Code exited with error: {_redact_secrets(result.stderr)}")
             _check_upstream_errors(result.stderr)
             return {"error": result.stderr}
 
@@ -185,12 +185,13 @@ async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
             }
         )
 
-        logger.info(f"stdout: {result.stdout!r}")
-        logger.info(f"stderr: {result.stderr!r}")
-        logger.info(f"returncode: {result.returncode}")
+        logger.debug(f"stdout: {_redact_secrets(result.stdout)!r}")
+        logger.debug(f"stderr: {_redact_secrets(result.stderr)!r}")
+        logger.debug(f"returncode: {result.returncode}")
+        logger.info(f"Claude Code completed: returncode={result.returncode} stdout_bytes={len(result.stdout)} stderr_bytes={len(result.stderr)}")
 
         if result.returncode != 0:
-            logger.error(f"Claude Code exited with error: {result.stderr}")
+            logger.error(f"Claude Code exited with error: {_redact_secrets(result.stderr)}")
             _check_upstream_errors(result.stderr)
             return {"error": result.stderr}
 
