@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -523,4 +525,56 @@ func TestMCPHandlers(t *testing.T) {
 			t.Errorf("Newly created directory 'listed_dir/' not found in list output: %v", files)
 		}
 	})
+}
+
+func TestReadContentNotLogged(t *testing.T) {
+	tempDir := t.TempDir()
+	rootDir, err := os.OpenRoot(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to open root: %v", err)
+	}
+	defer rootDir.Close()
+
+	token := "secret-test-token"
+	sentinel := "SENSITIVE_SECRET_MARKER_12345"
+
+	filename := "secret.txt"
+	if err := os.WriteFile(filepath.Join(tempDir, filename), []byte(sentinel), 0644); err != nil {
+		t.Fatalf("Setup failed: %v", err)
+	}
+
+	// Capture log output
+	var logBuf bytes.Buffer
+	origOut := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(origOut)
+
+	req := httptest.NewRequest("GET", "/read?path="+filename, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	handleRead(rootDir, token)(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Read returned status %d", rr.Code)
+	}
+
+	// Response body must contain the sentinel (read works correctly)
+	if !strings.Contains(rr.Body.String(), sentinel) {
+		t.Errorf("Response body missing sentinel: got %q", rr.Body.String())
+	}
+
+	logOutput := logBuf.String()
+
+	// Log must NOT contain the file content
+	if strings.Contains(logOutput, sentinel) {
+		t.Errorf("File content found in log output: %q", logOutput)
+	}
+
+	// Log must contain FILE_READ: and byte count
+	if !strings.Contains(logOutput, "FILE_READ:") {
+		t.Errorf("Expected FILE_READ: in log, got: %q", logOutput)
+	}
+	if !strings.Contains(logOutput, fmt.Sprintf("%d bytes", len(sentinel))) {
+		t.Errorf("Expected byte count %d in log, got: %q", len(sentinel), logOutput)
+	}
 }
