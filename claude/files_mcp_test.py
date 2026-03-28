@@ -387,3 +387,54 @@ async def test_create_directory_connection_failure(mock_post):
     mock_post.side_effect = Exception("Connection refused")
     with pytest.raises(Exception, match="Connection refused"):
         await _dispatch("create_directory", {"path": "somedir"})
+
+
+# --- URL-encoding: special chars passed via params= kwarg, not string-interpolated ---
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.get")
+async def test_read_file_special_chars_in_path(mock_get):
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.text = "data"
+    path = "dir/file with spaces&special#chars.txt"
+    result = await _dispatch("read_workspace_file", {"file_path": path})
+    assert result == "data"
+    args, kwargs = mock_get.call_args
+    assert args[0] == "https://mcp-server:8443/read"
+    assert kwargs["params"] == {"path": path}
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_create_file_special_chars(mock_post):
+    mock_post.return_value.status_code = 201
+    path = "new?file&name.txt"
+    result = await _dispatch("create_file", {"path": path})
+    assert result == "File created"
+    args, kwargs = mock_post.call_args
+    assert args[0] == "https://mcp-server:8443/create"
+    assert kwargs["params"] == {"path": path}
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.delete")
+async def test_delete_file_special_chars(mock_delete):
+    mock_delete.return_value.status_code = 200
+    path = "old file & dir/remove#me.txt"
+    result = await _dispatch("delete_file", {"path": path})
+    assert result == "File deleted"
+    args, kwargs = mock_delete.call_args
+    assert args[0] == "https://mcp-server:8443/remove"
+    assert kwargs["params"] == {"path": path}
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_create_directory_special_chars(mock_post):
+    mock_post.return_value.status_code = 201
+    path = "my dir/sub&dir?name"
+    result = await _dispatch("create_directory", {"path": path})
+    assert result == "Directory created"
+    args, kwargs = mock_post.call_args
+    assert args[0] == "https://mcp-server:8443/mkdir"
+    assert kwargs["params"] == {"path": path}
