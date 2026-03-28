@@ -21,7 +21,8 @@ sys.modules["verify_isolation"] = MagicMock()
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import HTTPException  # noqa: E402
-from server import _check_upstream_errors  # noqa: E402
+from server import _check_upstream_errors, _redact_secrets  # noqa: E402
+import server as _server_module  # noqa: E402
 
 
 class TestCheckUpstreamAuthError:
@@ -45,3 +46,42 @@ class TestCheckUpstreamAuthError:
         """Returns None and does not raise when text has no auth error markers."""
         result = _check_upstream_errors("Everything is working fine, no issues here.")
         assert result is None
+
+
+class TestRedactSecrets:
+    def test_known_token_is_redacted(self):
+        """A token present in _SECRET_TOKENS is replaced with [REDACTED]."""
+        # Use a token that matches what test.sh exports (CLAUDE_API_TOKEN=dummy-claude-token)
+        token = _server_module._SECRET_TOKENS[0] if _server_module._SECRET_TOKENS else None
+        if token is None:
+            pytest.skip("No secret tokens configured")
+        result = _redact_secrets(f"Bearer {token} is the key")
+        assert token not in result
+        assert "[REDACTED]" in result
+
+    def test_multiple_tokens_all_redacted(self):
+        """All known tokens in the same string are redacted."""
+        tokens = _server_module._SECRET_TOKENS[:2]
+        if len(tokens) < 2:
+            pytest.skip("Need at least 2 secret tokens configured")
+        text = f"key={tokens[0]} token={tokens[1]}"
+        result = _redact_secrets(text)
+        assert tokens[0] not in result
+        assert tokens[1] not in result
+        assert result.count("[REDACTED]") == 2
+
+    def test_non_string_returned_unchanged(self):
+        """Non-string input is returned as-is without error."""
+        assert _redact_secrets(None) is None
+        assert _redact_secrets(42) == 42
+
+    def test_text_without_secrets_unchanged(self):
+        """Text with no secret tokens is returned unchanged."""
+        text = "No secrets here, just ordinary log output."
+        assert _redact_secrets(text) == text
+
+    def test_no_secret_re_returns_text(self, monkeypatch):
+        """When _SECRET_RE is None (no tokens configured), text is returned as-is."""
+        monkeypatch.setattr(_server_module, "_SECRET_RE", None)
+        text = "some text"
+        assert _redact_secrets(text) == text
