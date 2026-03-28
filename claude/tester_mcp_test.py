@@ -12,7 +12,13 @@ os.environ["TESTER_SERVER_URL"] = "https://tester-server:8443"
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from tester_mcp import _dispatch, call_tool
+from tester_mcp import _dispatch, call_tool, _reset_strike_counter
+
+
+# Ensure state is clean before every test
+@pytest.fixture(autouse=True)
+def reset_state():
+    _reset_strike_counter()
 
 
 # --- _dispatch: run_tests ---
@@ -152,6 +158,70 @@ async def test_get_results_connection_failure(mock_get):
     mock_get.side_effect = Exception("Connection refused")
     with pytest.raises(Exception, match="Connection refused"):
         await _dispatch("get_test_results", {})
+
+
+# --- _dispatch: 3-Strike Rule ---
+
+@pytest.mark.asyncio
+@patch("tester_mcp.requests.get")
+@patch("tester_mcp.requests.post")
+async def test_3_strike_rule_blocks_run(mock_post, mock_get):
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = {"status": "started"}
+
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {"status": "fail"}
+
+    # Strike 1
+    await _dispatch("run_tests", {})
+    await _dispatch("get_test_results", {})
+
+    # Strike 2
+    await _dispatch("run_tests", {})
+    await _dispatch("get_test_results", {})
+    
+    # Polling multiple times during strike 2 shouldn't double count
+    await _dispatch("get_test_results", {})
+    await _dispatch("get_test_results", {})
+
+    # Strike 3
+    await _dispatch("run_tests", {})
+    await _dispatch("get_test_results", {})
+
+    # 4th run attempt should be blocked
+    with pytest.raises(RuntimeError, match="HARD STOP"):
+        await _dispatch("run_tests", {})
+
+
+@pytest.mark.asyncio
+@patch("tester_mcp.requests.get")
+@patch("tester_mcp.requests.post")
+async def test_3_strike_rule_resets_on_pass(mock_post, mock_get):
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = {"status": "started"}
+
+    # Strike 1 & 2
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {"status": "fail"}
+    await _dispatch("run_tests", {})
+    await _dispatch("get_test_results", {})
+    await _dispatch("run_tests", {})
+    await _dispatch("get_test_results", {})
+
+    # Pass resets the counter
+    mock_get.return_value.json.return_value = {"status": "pass"}
+    await _dispatch("run_tests", {})
+    await _dispatch("get_test_results", {})
+
+    # Two more fails shouldn't block
+    mock_get.return_value.json.return_value = {"status": "fail"}
+    await _dispatch("run_tests", {})
+    await _dispatch("get_test_results", {})
+    await _dispatch("run_tests", {})
+    await _dispatch("get_test_results", {})
+
+    # 3rd run after pass is allowed
+    await _dispatch("run_tests", {})
 
 
 # --- _dispatch: unknown tool ---

@@ -10,12 +10,21 @@ from mcp.types import CallToolResult, TextContent
 import asyncio
 from mcp.server.stdio import stdio_server
 
-
 logger = logging.getLogger(__name__)
 
 server = Server("tester")
 HEADERS = {"Authorization": f"Bearer {TESTER_API_TOKEN}"}
 VERIFY = "/app/certs/ca.crt"
+
+# --- 3-Strike Rule State ---
+_consecutive_failures = 0
+_failure_counted_for_current_run = False
+
+def _reset_strike_counter():
+    """For testing purposes: resets the strike counter state."""
+    global _consecutive_failures, _failure_counted_for_current_run
+    _consecutive_failures = 0
+    _failure_counted_for_current_run = False
 
 
 @server.list_tools()
@@ -57,12 +66,20 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
 
 
 async def _dispatch(name: str, arguments: dict) -> str:
+    global _consecutive_failures, _failure_counted_for_current_run
+
     if name == "run_tests":
+        if _consecutive_failures >= 3:
+            raise RuntimeError(
+                "HARD STOP: You have failed 3 consecutive test runs. You MUST call `plan_block` immediately with a summary of the failures. Do not attempt to run tests again."
+            )
+
         response = requests.post(
             f"{TESTER_SERVER_URL}/run",
             headers=HEADERS, verify=VERIFY, timeout=10
         )
         if response.status_code == 200:
+            _failure_counted_for_current_run = False
             return json.dumps(response.json())
         elif response.status_code == 401:
             raise PermissionError("Unauthorized. Token mismatch.")
@@ -77,7 +94,18 @@ async def _dispatch(name: str, arguments: dict) -> str:
             headers=HEADERS, verify=VERIFY, timeout=10
         )
         if response.status_code == 200:
-            return json.dumps(response.json())
+            data = response.json()
+            status = data.get("status")
+
+            # Track failures and reset on pass
+            if status == "fail" and not _failure_counted_for_current_run:
+                _consecutive_failures += 1
+                _failure_counted_for_current_run = True
+            elif status == "pass":
+                _consecutive_failures = 0
+                _failure_counted_for_current_run = False
+
+            return json.dumps(data)
         elif response.status_code == 401:
             raise PermissionError("Unauthorized. Token mismatch.")
         else:
