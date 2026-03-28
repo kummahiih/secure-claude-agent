@@ -10,6 +10,8 @@ sys.modules["runenv"] = MagicMock(
     DYNAMIC_AGENT_KEY="dummy-key",
     ANTHROPIC_BASE_URL="https://api.anthropic.com",
     MCP_API_TOKEN="dummy-mcp-token",
+    PLAN_API_TOKEN="dummy-plan-token",
+    TESTER_API_TOKEN="dummy-tester-token",
     SYSTEM_PROMPT="test system prompt",
     PLAN_SYSTEM_PROMPT="test plan system prompt",
 )

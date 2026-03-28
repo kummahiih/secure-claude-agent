@@ -109,6 +109,22 @@ class TestForbiddenEnvVars:
             with pytest.raises(SystemExit):
                 vi.verify_all("proxy")
 
+    def test_proxy_rejects_plan_api_token(self, clean_env_proxy):
+        env = {**clean_env_proxy, "PLAN_API_TOKEN": "leaked"}
+        with patch.dict(os.environ, env, clear=True), \
+             patch("os.path.exists", side_effect=_make_exists("proxy")), \
+             patch("verify_isolation.find_env_files", return_value=[]):
+            with pytest.raises(SystemExit):
+                vi.verify_all("proxy")
+
+    def test_proxy_rejects_tester_api_token(self, clean_env_proxy):
+        env = {**clean_env_proxy, "TESTER_API_TOKEN": "leaked"}
+        with patch.dict(os.environ, env, clear=True), \
+             patch("os.path.exists", side_effect=_make_exists("proxy")), \
+             patch("verify_isolation.find_env_files", return_value=[]):
+            with pytest.raises(SystemExit):
+                vi.verify_all("proxy")
+
     def test_proxy_allows_real_api_key(self, clean_env_proxy):
         """Proxy is the one container that SHOULD have the real key."""
         with patch.dict(os.environ, clean_env_proxy, clear=True), \
@@ -117,7 +133,7 @@ class TestForbiddenEnvVars:
             vi.verify_all("proxy")
 
     def test_caddy_rejects_all_backend_tokens(self, clean_env_caddy):
-        for var in ["ANTHROPIC_API_KEY", "DYNAMIC_AGENT_KEY", "MCP_API_TOKEN", "CLAUDE_API_TOKEN"]:
+        for var in ["ANTHROPIC_API_KEY", "DYNAMIC_AGENT_KEY", "MCP_API_TOKEN", "PLAN_API_TOKEN", "TESTER_API_TOKEN", "CLAUDE_API_TOKEN"]:
             env = {**clean_env_caddy, var: "leaked"}
             with patch.dict(os.environ, env, clear=True):
                 with pytest.raises(SystemExit):
@@ -159,6 +175,18 @@ class TestRequiredEnvVars:
 
     def test_tester_server_rejects_mcp_token(self):
         env = {"TESTER_API_TOKEN": "t", "MCP_API_TOKEN": "leaked"}
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(SystemExit):
+                vi.verify_all("tester-server")
+
+    def test_plan_server_rejects_tester_token(self):
+        env = {"PLAN_API_TOKEN": "t", "TESTER_API_TOKEN": "leaked"}
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(SystemExit):
+                vi.verify_all("plan-server")
+
+    def test_tester_server_rejects_plan_token(self):
+        env = {"TESTER_API_TOKEN": "t", "PLAN_API_TOKEN": "leaked"}
         with patch.dict(os.environ, env, clear=True):
             with pytest.raises(SystemExit):
                 vi.verify_all("tester-server")

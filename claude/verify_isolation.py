@@ -44,19 +44,25 @@ FORBIDDEN_ENV_VARS = {
     "plan-server": [
         "ANTHROPIC_API_KEY",
         "MCP_API_TOKEN",          # mcp-server token must not reach plan-server
+        "TESTER_API_TOKEN",       # tester-server token must not reach plan-server
     ],
     "tester-server": [
         "ANTHROPIC_API_KEY",
         "MCP_API_TOKEN",          # mcp-server token must not reach tester-server
+        "PLAN_API_TOKEN",         # plan-server token must not reach tester-server
     ],
     "proxy": [
         "MCP_API_TOKEN",          # Internal MCP auth, not for proxy
+        "PLAN_API_TOKEN",         # Internal plan auth, not for proxy
+        "TESTER_API_TOKEN",       # Internal tester auth, not for proxy
         "CLAUDE_API_TOKEN",       # Ingress auth, not for proxy
     ],
     "caddy": [
         "ANTHROPIC_API_KEY",      # Real key, not for caddy
         "DYNAMIC_AGENT_KEY",      # Agent-side token, not for caddy
         "MCP_API_TOKEN",          # Internal MCP auth, not for caddy
+        "PLAN_API_TOKEN",         # Internal plan auth, not for caddy
+        "TESTER_API_TOKEN",       # Internal tester auth, not for caddy
         "CLAUDE_API_TOKEN",       # Ingress auth handled via Caddyfile, not env
         "AGENT_API_TOKEN",        # Auth is handled by claude-server, not Caddy
     ],
