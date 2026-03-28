@@ -2,7 +2,7 @@ import logging
 import requests
 import json
 import setuplogging
-from runenv import TESTER_SERVER_URL, MCP_API_TOKEN
+from runenv import TESTER_SERVER_URL, TESTER_API_TOKEN
 from mcp.server import Server
 from mcp import types
 from mcp.types import CallToolResult, TextContent
@@ -14,7 +14,7 @@ from mcp.server.stdio import stdio_server
 logger = logging.getLogger(__name__)
 
 server = Server("tester")
-HEADERS = {"Authorization": f"Bearer {MCP_API_TOKEN}"}
+HEADERS = {"Authorization": f"Bearer {TESTER_API_TOKEN}"}
 VERIFY = "/app/certs/ca.crt"
 
 

@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 
 # Inject dummy env vars BEFORE importing
 os.environ["MCP_API_TOKEN"] = "dummy-mcp-token"
+os.environ["TESTER_API_TOKEN"] = "dummy-tester-token"
 os.environ["MCP_SERVER_URL"] = "https://mcp-server:8443"
 os.environ["TESTER_SERVER_URL"] = "https://tester-server:8443"
 

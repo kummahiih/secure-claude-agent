@@ -3,6 +3,7 @@ set -euo pipefail
 
 # Dummy tokens for unit tests — no real services are contacted
 export MCP_API_TOKEN="${MCP_API_TOKEN:-dummy-mcp-token}"
+export TESTER_API_TOKEN="${TESTER_API_TOKEN:-dummy-tester-token}"
 export MCP_SERVER_URL="${MCP_SERVER_URL:-https://mcp-server:8443}"
 export TESTER_SERVER_URL="${TESTER_SERVER_URL:-https://tester-server:8443}"
 export PLAN_SERVER_URL="${PLAN_SERVER_URL:-https://plan-server:8443}"
