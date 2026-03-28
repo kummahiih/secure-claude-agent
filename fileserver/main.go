@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
@@ -60,7 +61,7 @@ func handleRead(rootDir *os.Root, token string) http.HandlerFunc {
 		}
 
 		// 1. Log the content for your own sanity
-		log.Printf("FILE_SUCCESS: Sending raw content: %s", string(data))
+		log.Printf("FILE_READ: %s (%d bytes, sha256=%x)", targetPath, len(data), sha256.Sum256(data))
 
 		// 2. Set as plain text so the LLM sees it as a direct message
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
