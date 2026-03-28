@@ -38,14 +38,24 @@ def _expand_slash_command(query: str) -> str:
     return query
 
 
-def _check_upstream_auth_error(text: str) -> None:
-    """Raise HTTPException 502 if text contains upstream authentication error markers."""
+def _check_upstream_errors(text: str) -> None:
+    """Raise HTTPException if text contains upstream error markers."""
+    if not text:
+        return
+        
+    # Catch Auth Errors (502 Bad Gateway to proxy)
     if 'OAuth token has expired' in text or 'authentication_error' in text:
         raise HTTPException(
             status_code=502,
             detail='Upstream API authentication failure \u2014 please refresh your ANTHROPIC_API_KEY.',
         )
-
+        
+    # Catch Rate Limit Errors (429 Too Many Requests)
+    if 'rate_limit_error' in text or '429' in text or 'Too Many Requests' in text:
+        raise HTTPException(
+            status_code=429,
+            detail='Upstream API rate limit exceeded. Please try again later.'
+        )
 
 app = FastAPI(title="Secure Claude Code Server")
 security = HTTPBearer()
@@ -111,14 +121,14 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
 
         if result.returncode != 0:
             logger.error(f"Claude Code exited with error: {result.stderr}")
-            _check_upstream_auth_error(result.stderr)
+            _check_upstream_errors(result.stderr)
             return {"error": result.stderr}
 
         try:
             parsed = json.loads(result.stdout)
             if parsed.get("is_error"):
                 error_text = parsed.get("result", "Unknown error")
-                _check_upstream_auth_error(error_text)
+                _check_upstream_errors(error_text)
                 return {"error": error_text}
             return {"response": parsed.get("result", "")}
         except json.JSONDecodeError:
@@ -167,14 +177,14 @@ async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
 
         if result.returncode != 0:
             logger.error(f"Claude Code exited with error: {result.stderr}")
-            _check_upstream_auth_error(result.stderr)
+            _check_upstream_errors(result.stderr)
             return {"error": result.stderr}
 
         try:
             parsed = json.loads(result.stdout)
             if parsed.get("is_error"):
                 error_text = parsed.get("result", "Unknown error")
-                _check_upstream_auth_error(error_text)
+                _check_upstream_errors(error_text)
                 return {"error": error_text}
             return {"response": parsed.get("result", "")}
         except json.JSONDecodeError:
