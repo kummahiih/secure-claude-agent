@@ -22,6 +22,8 @@ def clean_env_claude_server():
     return {
         "DYNAMIC_AGENT_KEY": "test-dynamic-key",
         "MCP_API_TOKEN": "test-mcp-token",
+        "PLAN_API_TOKEN": "test-plan-token",
+        "TESTER_API_TOKEN": "test-tester-token",
         "CLAUDE_API_TOKEN": "test-claude-token",
         "ANTHROPIC_BASE_URL": "https://proxy:4000",
     }
@@ -126,28 +128,50 @@ class TestRequiredEnvVars:
     """Each container must have its required env vars or fail."""
 
     def test_claude_server_missing_dynamic_key(self):
-        env = {"MCP_API_TOKEN": "t", "CLAUDE_API_TOKEN": "t", "ANTHROPIC_BASE_URL": "t"}
+        env = {"MCP_API_TOKEN": "t", "PLAN_API_TOKEN": "t", "TESTER_API_TOKEN": "t", "CLAUDE_API_TOKEN": "t", "ANTHROPIC_BASE_URL": "t"}
         with patch.dict(os.environ, env, clear=True):
             with pytest.raises(SystemExit):
                 vi.verify_all("claude-server")
 
     def test_claude_server_missing_mcp_token(self):
-        env = {"DYNAMIC_AGENT_KEY": "t", "CLAUDE_API_TOKEN": "t", "ANTHROPIC_BASE_URL": "t"}
+        env = {"DYNAMIC_AGENT_KEY": "t", "PLAN_API_TOKEN": "t", "TESTER_API_TOKEN": "t", "CLAUDE_API_TOKEN": "t", "ANTHROPIC_BASE_URL": "t"}
         with patch.dict(os.environ, env, clear=True):
             with pytest.raises(SystemExit):
                 vi.verify_all("claude-server")
 
     def test_claude_server_missing_claude_api_token(self):
-        env = {"DYNAMIC_AGENT_KEY": "t", "MCP_API_TOKEN": "t", "ANTHROPIC_BASE_URL": "t"}
+        env = {"DYNAMIC_AGENT_KEY": "t", "MCP_API_TOKEN": "t", "PLAN_API_TOKEN": "t", "TESTER_API_TOKEN": "t", "ANTHROPIC_BASE_URL": "t"}
         with patch.dict(os.environ, env, clear=True):
             with pytest.raises(SystemExit):
                 vi.verify_all("claude-server")
 
     def test_claude_server_missing_base_url(self):
-        env = {"DYNAMIC_AGENT_KEY": "t", "MCP_API_TOKEN": "t", "CLAUDE_API_TOKEN": "t"}
+        env = {"DYNAMIC_AGENT_KEY": "t", "MCP_API_TOKEN": "t", "PLAN_API_TOKEN": "t", "TESTER_API_TOKEN": "t", "CLAUDE_API_TOKEN": "t"}
         with patch.dict(os.environ, env, clear=True):
             with pytest.raises(SystemExit):
                 vi.verify_all("claude-server")
+
+    def test_plan_server_rejects_mcp_token(self):
+        env = {"PLAN_API_TOKEN": "t", "MCP_API_TOKEN": "leaked"}
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(SystemExit):
+                vi.verify_all("plan-server")
+
+    def test_tester_server_rejects_mcp_token(self):
+        env = {"TESTER_API_TOKEN": "t", "MCP_API_TOKEN": "leaked"}
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(SystemExit):
+                vi.verify_all("tester-server")
+
+    def test_plan_server_missing_plan_token(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(SystemExit):
+                vi.verify_all("plan-server")
+
+    def test_tester_server_missing_tester_token(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(SystemExit):
+                vi.verify_all("tester-server")
 
     def test_proxy_missing_api_key(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -362,6 +386,16 @@ class TestFullPass:
              patch("os.path.exists", side_effect=_make_exists("caddy")), \
              patch("verify_isolation.find_env_files", return_value=[]):
             vi.verify_all("caddy")
+
+    def test_plan_server_clean_passes(self):
+        env = {"PLAN_API_TOKEN": "test-plan-token"}
+        with patch.dict(os.environ, env, clear=True):
+            vi.verify_all("plan-server")
+
+    def test_tester_server_clean_passes(self):
+        env = {"TESTER_API_TOKEN": "test-tester-token"}
+        with patch.dict(os.environ, env, clear=True):
+            vi.verify_all("tester-server")
 
 
 # --- Unknown role test ---

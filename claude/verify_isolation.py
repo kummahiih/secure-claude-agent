@@ -41,6 +41,14 @@ FORBIDDEN_ENV_VARS = {
     "mcp-server": [
         "ANTHROPIC_API_KEY",
     ],
+    "plan-server": [
+        "ANTHROPIC_API_KEY",
+        "MCP_API_TOKEN",          # mcp-server token must not reach plan-server
+    ],
+    "tester-server": [
+        "ANTHROPIC_API_KEY",
+        "MCP_API_TOKEN",          # mcp-server token must not reach tester-server
+    ],
     "proxy": [
         "MCP_API_TOKEN",          # Internal MCP auth, not for proxy
         "CLAUDE_API_TOKEN",       # Ingress auth, not for proxy
@@ -59,11 +67,19 @@ REQUIRED_ENV_VARS = {
     "claude-server": [
         "DYNAMIC_AGENT_KEY",      # Ephemeral key, renamed to ANTHROPIC_API_KEY in subprocess
         "MCP_API_TOKEN",          # For authenticating to mcp-server
+        "PLAN_API_TOKEN",         # For authenticating to plan-server
+        "TESTER_API_TOKEN",       # For authenticating to tester-server
         "CLAUDE_API_TOKEN",       # For ingress auth via Caddy
         "ANTHROPIC_BASE_URL",     # Points to proxy:4000
     ],
     "mcp-server": [
         "MCP_API_TOKEN",
+    ],
+    "plan-server": [
+        "PLAN_API_TOKEN",
+    ],
+    "tester-server": [
+        "TESTER_API_TOKEN",
     ],
     "proxy": [
         "ANTHROPIC_API_KEY",      # Real key for upstream

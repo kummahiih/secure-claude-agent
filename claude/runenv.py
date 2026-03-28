@@ -28,6 +28,10 @@ MCP_API_TOKEN = os.getenv("MCP_API_TOKEN")
 if not MCP_API_TOKEN:
     logging.error("MCP_API_TOKEN is not set!")
 
+PLAN_API_TOKEN = os.getenv("PLAN_API_TOKEN")
+if not PLAN_API_TOKEN:
+    logging.error("PLAN_API_TOKEN is not set!")
+
 TESTER_API_TOKEN = os.getenv("TESTER_API_TOKEN")
 if not TESTER_API_TOKEN:
     logging.error("TESTER_API_TOKEN is not set!")
