@@ -66,7 +66,10 @@ def _expand_slash_command(query: str) -> str:
     if not query.startswith("/"):
         return query
     # Strip the leading slash and any trailing whitespace/args
-    name = query[1:].split()[0]
+    parts = query[1:].split()
+    if not parts:
+        return query
+    name = parts[0]
     # Harden against path traversal: keep only the final component
     name = os.path.basename(name)
     if not name or any(bad in name for bad in PATH_BLACKLIST):

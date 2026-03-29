@@ -21,7 +21,7 @@ sys.modules["verify_isolation"] = MagicMock()
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import HTTPException  # noqa: E402
-from server import _check_upstream_errors, _redact_secrets  # noqa: E402
+from server import _check_upstream_errors, _redact_secrets, _expand_slash_command  # noqa: E402
 import server as _server_module  # noqa: E402
 
 
@@ -85,3 +85,75 @@ class TestRedactSecrets:
         monkeypatch.setattr(_server_module, "_SECRET_RE", None)
         text = "some text"
         assert _redact_secrets(text) == text
+
+
+class TestExpandSlashCommand:
+    def test_non_slash_query_unchanged(self):
+        """Queries not starting with '/' are returned unchanged."""
+        assert _expand_slash_command("hello world") == "hello world"
+        assert _expand_slash_command("") == ""
+
+    def test_path_traversal_stripped_by_basename(self):
+        """../../etc/passwd → basename → 'passwd'; no .md file exists, returns original."""
+        query = "/../../etc/passwd"
+        assert _expand_slash_command(query) == query
+
+    def test_double_dot_name_rejected(self):
+        """/.. → basename → '..' → caught by PATH_BLACKLIST, returns original."""
+        query = "/.."
+        assert _expand_slash_command(query) == query
+
+    def test_deeply_nested_traversal_rejected_or_stripped(self):
+        """Deeply nested traversal path is defanged: basename yields leaf component."""
+        # /../../../../etc/shadow → basename → 'shadow'; no file, returns original
+        query = "/../../../../etc/shadow"
+        result = _expand_slash_command(query)
+        # Either rejected or file not found — must not expand to unexpected content
+        assert result == query
+
+    def test_blacklisted_chars_rejected(self):
+        """Names containing blacklisted shell metacharacters are rejected."""
+        for char in [";", "|", "&", "$", "`", "!", "~", "\n", "\r", "\t"]:
+            query = f"/cmd{char}inject"
+            assert _expand_slash_command(query) == query, (
+                f"Expected rejection for blacklisted char {char!r}"
+            )
+
+    def test_null_byte_in_name_rejected(self):
+        """Names containing a null byte are rejected."""
+        query = "/cmd\x00evil"
+        assert _expand_slash_command(query) == query
+
+    def test_empty_name_after_slash_rejected(self):
+        """A lone '/' with whitespace only after it is handled gracefully."""
+        assert _expand_slash_command("/ ") == "/ "
+
+    def test_valid_command_not_found_returns_original(self):
+        """A clean command name with no matching .md file returns the original query."""
+        query = "/nonexistent-command-xyzzy"
+        assert _expand_slash_command(query) == query
+
+    def test_valid_command_expands_file_contents(self, tmp_path, monkeypatch):
+        """A valid command name whose .md file exists returns the file contents."""
+        monkeypatch.setattr(_server_module, "COMMANDS_DIR", str(tmp_path))
+        (tmp_path / "my-cmd.md").write_text("do the thing")
+        assert _expand_slash_command("/my-cmd") == "do the thing"
+
+    def test_command_with_trailing_args_uses_first_token(self, tmp_path, monkeypatch):
+        """Only the first token after '/' is used as the command name."""
+        monkeypatch.setattr(_server_module, "COMMANDS_DIR", str(tmp_path))
+        (tmp_path / "cmd.md").write_text("expanded content")
+        assert _expand_slash_command("/cmd extra args here") == "expanded content"
+
+    def test_basename_cannot_escape_commands_dir(self, tmp_path, monkeypatch):
+        """Even if basename yields a valid filename, traversal outside COMMANDS_DIR is prevented."""
+        monkeypatch.setattr(_server_module, "COMMANDS_DIR", str(tmp_path))
+        # Create a file one level above COMMANDS_DIR with .md extension
+        parent = tmp_path.parent
+        (parent / "secret.md").write_text("secret content")
+        # Query with traversal: basename strips the ../ so name becomes 'secret'
+        # but the join will target tmp_path/secret.md, not parent/secret.md
+        query = "/../secret"
+        result = _expand_slash_command(query)
+        # File does not exist at COMMANDS_DIR/secret.md → returns original
+        assert result == query
