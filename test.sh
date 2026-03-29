@@ -15,6 +15,9 @@ export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-https://proxy:4000}"
 echo "[unit] Running Go fileserver tests..."
 (cd fileserver && GOTOOLCHAIN=local CGO_ENABLED=0 GOMAXPROCS=1 go test -p 1 -cpu 1 mcp_test.go main.go -v)
 
+echo "[unit] Running Go gitserver tests..."
+(cd gitserver && GOTOOLCHAIN=local CGO_ENABLED=0 GOMAXPROCS=1 go test -p 1 -cpu 1 main_test.go main.go -v)
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 export PROMPT_SYSTEM_DIR="${SCRIPT_DIR}/prompts/system"
 export PROMPT_COMMANDS_DIR="${SCRIPT_DIR}/prompts/commands"
