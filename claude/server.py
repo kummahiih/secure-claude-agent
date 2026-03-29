@@ -28,6 +28,30 @@ def _redact_secrets(text: str) -> str:
         return text
     return _SECRET_RE.sub("[REDACTED]", text)
 
+PATH_BLACKLIST = [
+    "\0",
+    "..",
+    "~",
+    ";",
+    "|",
+    "&",
+    "`",
+    "$",
+    "!",
+    "'",
+    '"',
+    "\\",
+    "\n",
+    "\r",
+    "\t",
+    ">",
+    "<",
+    "*",
+    "?",
+    "[",
+    "{",
+    "#",
+]
 
 def _expand_slash_command(query: str) -> str:
     """Expand a /command-name query into the contents of the matching .md file.
@@ -43,6 +67,11 @@ def _expand_slash_command(query: str) -> str:
         return query
     # Strip the leading slash and any trailing whitespace/args
     name = query[1:].split()[0]
+    # Harden against path traversal: keep only the final component
+    name = os.path.basename(name)
+    if not name or any(bad in name for bad in PATH_BLACKLIST):
+        logger.warning(f"Rejected potentially malicious slash command name: {query!r}")
+        return query
     cmd_path = os.path.join(COMMANDS_DIR, f"{name}.md")
     if os.path.isfile(cmd_path):
         logger.info(f"Expanding slash command /{name} from {cmd_path}")
