@@ -494,7 +494,7 @@ func main() {
 		Addr:    ":8443",
 		Handler: mux,
 		TLSConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
+			MinVersion: tls.VersionTLS13,
 		},
 	}
 
