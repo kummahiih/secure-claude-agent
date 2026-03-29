@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -576,5 +577,37 @@ func TestReadContentNotLogged(t *testing.T) {
 	}
 	if !strings.Contains(logOutput, fmt.Sprintf("%d bytes", len(sentinel))) {
 		t.Errorf("Expected byte count %d in log, got: %q", len(sentinel), logOutput)
+	}
+}
+
+func TestTLSMinVersion13(t *testing.T) {
+	// Build a test server that enforces TLS 1.3 minimum (mirrors main.go config).
+	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	ts.TLS = &tls.Config{
+		MinVersion: tls.VersionTLS13,
+	}
+	ts.StartTLS()
+	defer ts.Close()
+
+	// TLS 1.3 client — must succeed.
+	tls13Client := ts.Client() // httptest gives a client that trusts the test cert
+	resp, err := tls13Client.Get(ts.URL)
+	if err != nil {
+		t.Fatalf("TLS 1.3 client failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("TLS 1.3 client got status %d", resp.StatusCode)
+	}
+
+	// TLS 1.2 max client — must be rejected.
+	baseTransport := ts.Client().Transport.(*http.Transport).Clone()
+	baseTransport.TLSClientConfig.MaxVersion = tls.VersionTLS12
+	tls12Client := &http.Client{Transport: baseTransport}
+	_, err = tls12Client.Get(ts.URL)
+	if err == nil {
+		t.Error("Expected TLS 1.2 client to be rejected, but connection succeeded")
 	}
 }
