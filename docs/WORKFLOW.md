@@ -16,7 +16,14 @@ Authoritative source: [`prompts/system/ask.md`](../prompts/system/ask.md).
        │
        └─ task exists
               │
-              ├─ status = blocked ────────────────────► output block reason, stop
+              ├─ status = blocked
+              │      │
+              │      ├─ user signals resolved ────────► plan_unblock (task_id)
+              │      │                                        │
+              │      │                                        ▼
+              │      │                                   execute task (using resume_context)
+              │      │
+              │      └─ user has NOT signalled ────────► output block reason + resume_context, stop
               │
               └─ status = pending / in_progress
                      │
@@ -57,7 +64,7 @@ Authoritative source: [`prompts/system/ask.md`](../prompts/system/ask.md).
 
 | Rule | Detail |
 | :--- | :--- |
-| Blocked tasks | Never attempt work on a blocked task — output the reason and stop |
+| Blocked tasks | If user indicates blockage resolved, call `plan_unblock` and resume using `resume_context`; otherwise output reason + `resume_context` and stop |
 | Commit gate | Always `git_add` + `git_commit` before `plan_complete` when code changed |
 | Test gate | Never call `plan_complete` while tests are failing |
 | Retry limit | Up to 3 `run_tests` attempts per task; call `plan_block` after the 3rd failure |
