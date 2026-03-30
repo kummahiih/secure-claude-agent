@@ -6,7 +6,7 @@ import secrets
 import subprocess
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import setuplogging
 from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN, SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT
 from verify_isolation import verify_all
@@ -140,8 +140,8 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 
 
 class QueryRequest(BaseModel):
-    query: str
-    model: str  # kept for API compatibility, passed as --model to claude
+    query: str = Field(max_length=100_000)
+    model: str = Field(max_length=200)  # kept for API compatibility, passed as --model to claude
 
 
 
