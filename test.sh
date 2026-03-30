@@ -11,6 +11,8 @@ export PLAN_SERVER_URL="${PLAN_SERVER_URL:-https://plan-server:8443}"
 export CLAUDE_API_TOKEN="${CLAUDE_API_TOKEN:-dummy-claude-token}"
 export DYNAMIC_AGENT_KEY="${DYNAMIC_AGENT_KEY:-dummy-agent-key}"
 export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-https://proxy:4000}"
+export GIT_API_TOKEN="${GIT_API_TOKEN:-dummy-git-token}"
+export GIT_SERVER_URL="${GIT_SERVER_URL:-https://git-server:8443}"
 
 echo "[unit] Running Go fileserver tests..."
 (cd fileserver && GOTOOLCHAIN=local CGO_ENABLED=0 GOMAXPROCS=1 go test -p 1 -cpu 1 mcp_test.go main.go -v)
