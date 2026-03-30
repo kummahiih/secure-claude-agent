@@ -156,3 +156,38 @@ def test_plan_loop_block_after_retries():
         assert "--system-prompt" in call_args[0][0]
         idx = call_args[0][0].index("--system-prompt")
         assert call_args[0][0][idx + 1] == SYSTEM_PROMPT
+
+
+class TestModelAllowlist:
+    def test_ask_rejects_unknown_model(self):
+        headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
+        response = client.post("/ask", headers=headers, json={"model": "gpt-4", "query": "hello"})
+        assert response.status_code == 400
+        assert "not allowed" in response.json()["detail"]
+
+    def test_plan_rejects_unknown_model(self):
+        headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
+        response = client.post("/plan", headers=headers, json={"model": "gpt-4", "query": "hello"})
+        assert response.status_code == 400
+        assert "not allowed" in response.json()["detail"]
+
+    def test_ask_accepts_allowed_model(self):
+        headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "ok"
+        with patch("server.subprocess.run", return_value=mock_result):
+            response = client.post("/ask", headers=headers, json={"model": "claude-sonnet-4-6", "query": "hello"})
+        assert response.status_code == 200
+
+    def test_ask_rejects_empty_model(self):
+        headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
+        response = client.post("/ask", headers=headers, json={"model": "", "query": "hello"})
+        assert response.status_code == 400
+        assert "not allowed" in response.json()["detail"]
+
+    def test_model_validation_is_exact_match(self):
+        headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
+        response = client.post("/ask", headers=headers, json={"model": "claude-sonnet-4-6-evil", "query": "hello"})
+        assert response.status_code == 400
+        assert "not allowed" in response.json()["detail"]
