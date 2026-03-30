@@ -12,6 +12,7 @@ sys.modules["runenv"] = MagicMock(
     MCP_API_TOKEN="dummy-mcp-token",
     PLAN_API_TOKEN="dummy-plan-token",
     TESTER_API_TOKEN="dummy-tester-token",
+    GIT_API_TOKEN="dummy-git-token",
     SYSTEM_PROMPT="test system prompt",
     PLAN_SYSTEM_PROMPT="test plan system prompt",
 )
@@ -79,6 +80,13 @@ class TestRedactSecrets:
         """Text with no secret tokens is returned unchanged."""
         text = "No secrets here, just ordinary log output."
         assert _redact_secrets(text) == text
+
+    def test_git_api_token_is_redacted(self):
+        """GIT_API_TOKEN value is in _SECRET_TOKENS and is redacted from output."""
+        assert "dummy-git-token" in _server_module._SECRET_TOKENS
+        result = _redact_secrets("leaked dummy-git-token here")
+        assert "dummy-git-token" not in result
+        assert "[REDACTED]" in result
 
     def test_no_secret_re_returns_text(self, monkeypatch):
         """When _SECRET_RE is None (no tokens configured), text is returned as-is."""
