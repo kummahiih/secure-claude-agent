@@ -157,3 +157,34 @@ class TestExpandSlashCommand:
         result = _expand_slash_command(query)
         # File does not exist at COMMANDS_DIR/secret.md → returns original
         assert result == query
+
+
+class TestQueryRequestValidation:
+    def test_normal_query_and_model_accepted(self):
+        from server import QueryRequest
+        req = QueryRequest(query="hello", model="claude-sonnet-4-6")
+        assert req.query == "hello"
+        assert req.model == "claude-sonnet-4-6"
+
+    def test_query_at_max_length_accepted(self):
+        from pydantic import ValidationError
+        from server import QueryRequest
+        req = QueryRequest(query="a" * 100_000, model="m")
+        assert len(req.query) == 100_000
+
+    def test_query_over_max_length_rejected(self):
+        from pydantic import ValidationError
+        from server import QueryRequest
+        with pytest.raises(ValidationError):
+            QueryRequest(query="a" * 100_001, model="m")
+
+    def test_model_at_max_length_accepted(self):
+        from server import QueryRequest
+        req = QueryRequest(query="q", model="m" * 200)
+        assert len(req.model) == 200
+
+    def test_model_over_max_length_rejected(self):
+        from pydantic import ValidationError
+        from server import QueryRequest
+        with pytest.raises(ValidationError):
+            QueryRequest(query="q", model="m" * 201)
