@@ -187,7 +187,7 @@ func handleHealth() http.HandlerFunc {
 func handleStatus(s *gitState, token string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !verifyToken(r, token) {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 			return
 		}
 		submodulePath := r.URL.Query().Get("submodule_path")
@@ -195,7 +195,7 @@ func handleStatus(s *gitState, token string) http.HandlerFunc {
 		stdout, stderr, exit := runGit(gd, wt, "status", "--short")
 		log.Printf("GIT_STATUS: submodule=%q exit=%d", submodulePath, exit)
 		if exit != 0 {
-			http.Error(w, "git status failed: "+stderr, http.StatusInternalServerError)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "git status failed: " + stderr})
 			return
 		}
 		output := stdout
@@ -211,7 +211,7 @@ func handleStatus(s *gitState, token string) http.HandlerFunc {
 func handleDiff(s *gitState, token string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !verifyToken(r, token) {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 			return
 		}
 		staged := r.URL.Query().Get("staged") == "true"
@@ -225,7 +225,7 @@ func handleDiff(s *gitState, token string) http.HandlerFunc {
 		stdout, stderr, exit := runGit(gd, wt, args...)
 		log.Printf("GIT_DIFF: staged=%v submodule=%q exit=%d", staged, submodulePath, exit)
 		if exit != 0 {
-			http.Error(w, "git diff failed: "+stderr, http.StatusInternalServerError)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "git diff failed: " + stderr})
 			return
 		}
 		output := stdout
@@ -245,22 +245,22 @@ func handleDiff(s *gitState, token string) http.HandlerFunc {
 func handleAdd(s *gitState, token string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 			return
 		}
 		if !verifyToken(r, token) {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 			return
 		}
 		var req struct {
 			Paths []string `json:"paths"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
 			return
 		}
 		if len(req.Paths) == 0 {
-			http.Error(w, "paths is required", http.StatusBadRequest)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "paths is required"})
 			return
 		}
 
@@ -272,7 +272,7 @@ func handleAdd(s *gitState, token string) http.HandlerFunc {
 				commonGD = gd
 				commonWT = wt
 			} else if commonGD != gd {
-				http.Error(w, "paths span multiple repositories; stage each submodule separately", http.StatusBadRequest)
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "paths span multiple repositories; stage each submodule separately"})
 				return
 			}
 		}
@@ -298,7 +298,7 @@ func handleAdd(s *gitState, token string) http.HandlerFunc {
 		_, stderr, exit := runGit(commonGD, commonWT, addArgs...)
 		log.Printf("GIT_ADD: paths=%v exit=%d", req.Paths, exit)
 		if exit != 0 {
-			http.Error(w, "git add failed: "+stderr, http.StatusInternalServerError)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "git add failed: " + stderr})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"output": "Staged: " + strings.Join(req.Paths, ", ")})
@@ -310,11 +310,11 @@ func handleAdd(s *gitState, token string) http.HandlerFunc {
 func handleCommit(s *gitState, token string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 			return
 		}
 		if !verifyToken(r, token) {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 			return
 		}
 		var req struct {
@@ -322,12 +322,12 @@ func handleCommit(s *gitState, token string) http.HandlerFunc {
 			SubmodulePath string `json:"submodule_path"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
 			return
 		}
 		msg := strings.TrimSpace(req.Message)
 		if msg == "" {
-			http.Error(w, "message must not be empty", http.StatusBadRequest)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message must not be empty"})
 			return
 		}
 		gd, wt := s.repoFor(req.SubmodulePath)
@@ -342,7 +342,7 @@ func handleCommit(s *gitState, token string) http.HandlerFunc {
 				writeJSON(w, http.StatusOK, map[string]string{"output": "Nothing to commit — working tree clean."})
 				return
 			}
-			http.Error(w, "git commit failed: "+combined, http.StatusInternalServerError)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "git commit failed: " + combined})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"output": stdout})
@@ -354,7 +354,7 @@ func handleCommit(s *gitState, token string) http.HandlerFunc {
 func handleLog(s *gitState, token string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !verifyToken(r, token) {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 			return
 		}
 		maxCount := 10
@@ -382,7 +382,7 @@ func handleLog(s *gitState, token string) http.HandlerFunc {
 				writeJSON(w, http.StatusOK, map[string]string{"output": "No commits yet."})
 				return
 			}
-			http.Error(w, "git log failed: "+stderr, http.StatusInternalServerError)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "git log failed: " + stderr})
 			return
 		}
 		output := stdout
@@ -398,11 +398,11 @@ func handleLog(s *gitState, token string) http.HandlerFunc {
 func handleReset(s *gitState, token string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 			return
 		}
 		if !verifyToken(r, token) {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 			return
 		}
 		var req struct {
@@ -410,7 +410,7 @@ func handleReset(s *gitState, token string) http.HandlerFunc {
 			SubmodulePath string `json:"submodule_path"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
 			return
 		}
 		if req.Count <= 0 {
@@ -430,14 +430,14 @@ func handleReset(s *gitState, token string) http.HandlerFunc {
 			baseline = s.baselineCommit
 		}
 		if baseline == "" {
-			http.Error(w, "Cannot reset — no baseline commit (empty repo at startup)", http.StatusBadRequest)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Cannot reset — no baseline commit (empty repo at startup)"})
 			return
 		}
 
 		// Resolve the target commit.
 		target, _, exitTarget := runGit(gd, wt, "rev-parse", fmt.Sprintf("HEAD~%d", req.Count))
 		if exitTarget != 0 {
-			http.Error(w, fmt.Sprintf("Cannot reset %d commits — not enough history", req.Count), http.StatusBadRequest)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Cannot reset %d commits — not enough history", req.Count)})
 			return
 		}
 		target = strings.TrimSpace(target)
@@ -450,11 +450,11 @@ func handleReset(s *gitState, token string) http.HandlerFunc {
 				if len(baselineShort) > 12 {
 					baselineShort = baselineShort[:12]
 				}
-				http.Error(w, fmt.Sprintf(
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf(
 					"Cannot reset %d commits — would go past the baseline commit (%s). "+
 						"You can only undo commits created during this session.",
 					req.Count, baselineShort,
-				), http.StatusBadRequest)
+				)})
 				return
 			}
 		}
@@ -462,7 +462,7 @@ func handleReset(s *gitState, token string) http.HandlerFunc {
 		_, stderr, exit := runGit(gd, wt, "reset", "--soft", fmt.Sprintf("HEAD~%d", req.Count))
 		log.Printf("GIT_RESET: count=%d submodule=%q exit=%d", req.Count, req.SubmodulePath, exit)
 		if exit != 0 {
-			http.Error(w, "git reset failed: "+stderr, http.StatusInternalServerError)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "git reset failed: " + stderr})
 			return
 		}
 		targetShort := target
