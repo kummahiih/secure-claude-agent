@@ -42,22 +42,26 @@ FORBIDDEN_ENV_VARS = {
         "ANTHROPIC_API_KEY",
         "TESTER_API_TOKEN",       # tester-server token must not reach plan-server
         "PLAN_API_TOKEN",         # plan-server token must not reach tester-server
+        "GIT_API_TOKEN",          # git-server token must not reach mcp-server
     ],
     "plan-server": [
         "ANTHROPIC_API_KEY",
         "MCP_API_TOKEN",          # mcp-server token must not reach plan-server
         "TESTER_API_TOKEN",       # tester-server token must not reach plan-server
+        "GIT_API_TOKEN",          # git-server token must not reach plan-server
     ],
     "tester-server": [
         "ANTHROPIC_API_KEY",
         "MCP_API_TOKEN",          # mcp-server token must not reach tester-server
         "PLAN_API_TOKEN",         # plan-server token must not reach tester-server
+        "GIT_API_TOKEN",          # git-server token must not reach tester-server
     ],
     "proxy": [
         "MCP_API_TOKEN",          # Internal MCP auth, not for proxy
         "PLAN_API_TOKEN",         # Internal plan auth, not for proxy
         "TESTER_API_TOKEN",       # Internal tester auth, not for proxy
         "CLAUDE_API_TOKEN",       # Ingress auth, not for proxy
+        "GIT_API_TOKEN",          # Git-server auth, not for proxy
     ],
     "caddy": [
         "ANTHROPIC_API_KEY",      # Real key, not for caddy
@@ -67,6 +71,15 @@ FORBIDDEN_ENV_VARS = {
         "TESTER_API_TOKEN",       # Internal tester auth, not for caddy
         "CLAUDE_API_TOKEN",       # Ingress auth handled via Caddyfile, not env
         "AGENT_API_TOKEN",        # Auth is handled by claude-server, not Caddy
+        "GIT_API_TOKEN",          # Git-server auth, not for caddy
+    ],
+    "git-server": [
+        "ANTHROPIC_API_KEY",      # Real key, not for git-server
+        "DYNAMIC_AGENT_KEY",      # Agent-side token, not for git-server
+        "MCP_API_TOKEN",          # mcp-server token must not reach git-server
+        "PLAN_API_TOKEN",         # plan-server token must not reach git-server
+        "TESTER_API_TOKEN",       # tester-server token must not reach git-server
+        "CLAUDE_API_TOKEN",       # Ingress auth, not for git-server
     ],
 }
 
@@ -79,6 +92,10 @@ REQUIRED_ENV_VARS = {
         "TESTER_API_TOKEN",       # For authenticating to tester-server
         "CLAUDE_API_TOKEN",       # For ingress auth via Caddy
         "ANTHROPIC_BASE_URL",     # Points to proxy:4000
+        "GIT_API_TOKEN",          # For authenticating to git-server
+    ],
+    "git-server": [
+        "GIT_API_TOKEN",
     ],
     "mcp-server": [
         "MCP_API_TOKEN",
@@ -142,6 +159,10 @@ FORBIDDEN_PATHS = {
         "/app",
         "/workspace",
     ],
+    "git-server": [
+        "/app/.secrets.env",
+        "/app/.cluster_tokens.env",
+    ],
 }
 
 # Files/dirs that MUST exist — sanity check that mounts and copies are correct.
@@ -171,6 +192,10 @@ REQUIRED_PATHS = {
     ],
     "tester-server": [
         "/app",
+    ],
+    "git-server": [
+        "/app",
+        "/gitdir",
     ],
 }
 
