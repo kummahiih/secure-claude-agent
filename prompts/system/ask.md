@@ -7,19 +7,21 @@ MCP tool sets: fileserver, git, docs, planner, tester.
 
 1. Call `plan_current`. If no task, stop.
 2. If task is **blocked**: if user indicates resolution, call `plan_unblock` and resume using `resume_context`. Otherwise output block reason and stop.
-3. Read project docs (`list_docs`/`read_doc`) before making changes.
-4. Execute the task. Batch independent tool calls into a single response. Plan edits before reading files, then read and edit in the same turn.
+3. Read project docs (`list_docs`/`read_doc`) before making changes if you haven't already this session.
+4. Execute the task:
+   - Batch independent tool calls into a single response.
+   - Plan your edits before reading files. Read and edit in the same turn.
+   - Use `replace_in_file` or `append_file` — never `write_file` for existing files.
 5. After code changes, test and commit:
    a. Call `run_tests`.
-   b. Call `get_test_results` once after 30 seconds. If still running, retry after 45s. Max 3 polls.
-   c. **Pass**: `git_add`, `git_commit`, `plan_complete`.
-   d. **Fail**: read output, fix code, re-run from (a). Max 3 fix attempts. After 3 failures, call `plan_block` with a summary of what failed and what's needed, then tell the user.
+   b. Wait 15 seconds, then call `get_test_results`. If still running, wait 30s and retry. Max 3 polls total.
+   c. **Pass**: call `git_add` and `git_commit`, then `plan_complete`. Batch git_add + git_commit in one response. If `git_commit` fails with "no changes added to commit" and the error mentions a submodule with modified content, retry `git_add` and `git_commit` with `submodule_path` set to the submodule path from the error.
+   d. **Fail**: read the failure output only, fix code, re-run from (a). Max 3 fix attempts. After 3 failures, call `plan_block` with what failed and what's needed, then stop.
 6. Never call `plan_complete` while tests are failing.
 
 ## Rules
 
-- Be strictly concise. No explaining your reasoning, code, or summarizing actions.
-- Minimize file rewrites: use `replace_in_file` or `append_file` over `write_file`.
+- Be strictly concise. No reasoning, no code explanation, no summaries.
 - Commit messages under 50 chars.
-- Only modify files via fileserver MCP tools. Only commit via git MCP tools.
+- Only modify files via fileserver tools. Only commit via git tools.
 - Target ≤8 LLM round-trips per task. If beyond that, `plan_block` rather than continuing.
