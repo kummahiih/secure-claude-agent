@@ -8,7 +8,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 import setuplogging
-from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN, SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT
+from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN, GIT_API_TOKEN, SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT
 from verify_isolation import verify_all
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ def _validate_model(model: str) -> str:
     return model
 
 _SECRET_TOKENS = [
-    t for t in [CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN]
+    t for t in [CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN, GIT_API_TOKEN]
     if t
 ]
 _SECRET_RE = re.compile("|".join(re.escape(t) for t in _SECRET_TOKENS)) if _SECRET_TOKENS else None
