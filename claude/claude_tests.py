@@ -63,14 +63,21 @@ def test_fastapi_endpoint_authorized_claude_error():
     headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
     mock_result = MagicMock()
     mock_result.returncode = 1
-    mock_result.stderr = "claude: error: model not found"
+    mock_result.stderr = "claude: error: subprocess failed"
 
     with patch("server.subprocess.run", return_value=mock_result):
-        response = client.post("/ask", headers=headers, json={"model": "bad-model", "query": "What is the status?"})
+        response = client.post("/ask", headers=headers, json={"model": "claude-sonnet-4-6", "query": "What is the status?"})
         assert response.status_code == 200
         json_response = response.json()
         assert "error" in json_response
-        assert "model not found" in json_response["error"]
+        assert "subprocess failed" in json_response["error"]
+
+
+def test_fastapi_endpoint_disallowed_model():
+    headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
+    response = client.post("/ask", headers=headers, json={"model": "bad-model", "query": "What is the status?"})
+    assert response.status_code == 400
+    assert "bad-model" in response.json()["detail"]
 
 
 def test_fastapi_endpoint_timeout():

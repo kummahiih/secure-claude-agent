@@ -15,6 +15,22 @@ logger = logging.getLogger(__name__)
 
 COMMANDS_DIR = "/home/appuser/.claude/commands"
 
+ALLOWED_MODELS: frozenset[str] = frozenset({
+    "claude-sonnet-4-6",
+    "claude-opus-4-6",
+    "claude-haiku-4-5-20251001",
+})
+
+
+def _validate_model(model: str) -> str:
+    """Raise HTTP 400 if model is not in ALLOWED_MODELS."""
+    if model not in ALLOWED_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model '{model}' is not allowed. Allowed models: {sorted(ALLOWED_MODELS)}",
+        )
+    return model
+
 _SECRET_TOKENS = [
     t for t in [CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN]
     if t
@@ -138,6 +154,7 @@ async def health_check():
 async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
     """External endpoint routed through Caddy, secured with Bearer token."""
     logger.info(f"Received authenticated query: {request.query} for model: {request.model}")
+    _validate_model(request.model)
     query = _expand_slash_command(request.query)
     try:
         result = subprocess.run(
@@ -195,6 +212,7 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
 async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
     """Planning endpoint — Claude produces a plan without writing code."""
     logger.info(f"Received planning query: {request.query} for model: {request.model}")
+    _validate_model(request.model)
     query = _expand_slash_command(request.query)
     try:
         result = subprocess.run(
