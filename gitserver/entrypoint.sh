@@ -1,5 +1,5 @@
-#!/bin/bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 # Capture baseline commit at container startup (before any agent writes).
 # The git-server binary reads GIT_BASELINE_COMMIT on startup; if unset it
