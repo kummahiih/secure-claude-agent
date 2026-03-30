@@ -81,7 +81,7 @@ Follows the same isolation pattern as mcp-server (fileserver) and tester-server:
 - Bearer token auth (GIT_API_TOKEN) on all endpoints except /health
 - entrypoint.sh rejects startup if forbidden secrets are present
 - Workspace mounted read-only — only /gitdir is read-write
-- Hook prevention: `core.hooksPath=/dev/null` + `--no-verify` on commits + tmpfs shadow at `/workspace/.git`
+- Hook prevention: `core.hooksPath=/dev/null` + `--no-verify` on commits (workspace is `:ro` — no hook files can be written)
 - Baseline commit floor: captures HEAD at startup, rejects resets past that point
 
 ## Token Isolation
@@ -111,7 +111,7 @@ Follows the same isolation pattern as mcp-server (fileserver) and tester-server:
 | Decision | Chosen | Rejected | Reason |
 | :--- | :--- | :--- | :--- |
 | Language | Go | Python | Matches fileserver/tester pattern, single static binary |
-| Hook prevention | 3 layers (hooksPath + --no-verify + tmpfs shadow) | Single layer | Defence in depth; same as existing git_mcp.py |
+| Hook prevention | 2 layers (hooksPath + --no-verify) | tmpfs shadow | Workspace is :ro — shadow is redundant; mcp-server needs it because workspace is rw |
 | Baseline enforcement | Server-side at startup | Client-side | Prevents bypass; git-server owns the git state |
 | Workspace access | Read-only mount | Read-write | File writes go through mcp-server; gitserver only reads worktree |
 | Concurrency | Serialised via OS-level git locking | Explicit mutex | Git handles concurrent index writes natively |

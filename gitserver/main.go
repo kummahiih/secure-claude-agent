@@ -192,7 +192,7 @@ func handleStatus(s *gitState, token string) http.HandlerFunc {
 		}
 		submodulePath := r.URL.Query().Get("submodule_path")
 		gd, wt := s.repoFor(submodulePath)
-		stdout, stderr, exit := runGit(gd, wt, "status", "--short", "--ignore-submodules=all")
+		stdout, stderr, exit := runGit(gd, wt, "status", "--short")
 		log.Printf("GIT_STATUS: submodule=%q exit=%d", submodulePath, exit)
 		if exit != 0 {
 			http.Error(w, "git status failed: "+stderr, http.StatusInternalServerError)
@@ -218,7 +218,7 @@ func handleDiff(s *gitState, token string) http.HandlerFunc {
 		submodulePath := r.URL.Query().Get("submodule_path")
 		gd, wt := s.repoFor(submodulePath)
 
-		args := []string{"diff", "--ignore-submodules=all"}
+		args := []string{"diff"}
 		if staged {
 			args = append(args, "--cached")
 		}
