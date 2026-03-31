@@ -29,34 +29,43 @@ def test_fastapi_endpoint_unauthorized():
 
 def test_fastapi_endpoint_authorized_success():
     headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
-    mock_result = MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = "Here is the status."
+    mock_task = MagicMock()
+    mock_task.returncode = 0
+    mock_task.stdout = "Here is the status."
 
-    with patch("server.subprocess.run", return_value=mock_result) as mock_run:
+    mock_done = MagicMock()
+    mock_done.returncode = 0
+    mock_done.stdout = "DONE"
+
+    expected_call = (
+        [
+            "claude", "--print", "--dangerously-skip-permissions",
+            "--output-format", "json",
+            "--mcp-config", "/home/appuser/sandbox/.mcp.json",
+            "--model", "claude-sonnet-4-6",
+            "--system-prompt", SYSTEM_PROMPT,
+            "--", "What is the status?"],
+    )
+    expected_kwargs = dict(
+        cwd="/home/appuser/sandbox",
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env={
+            **os.environ,
+            "CLAUDE_CONFIG_DIR": "/home/appuser",
+            "HOME": "/home/appuser",
+            "ANTHROPIC_API_KEY": DYNAMIC_AGENT_KEY,
+        }
+    )
+
+    with patch("server.subprocess.run", side_effect=[mock_task, mock_done]) as mock_run:
         response = client.post("/ask", headers=headers, json={"model": "claude-sonnet-4-6", "query": "What is the status?"})
         assert response.status_code == 200
         json_response = response.json()
         assert json_response["response"] == "Here is the status."
-        mock_run.assert_called_once_with(
-            [
-                "claude", "--print", "--dangerously-skip-permissions",
-                "--output-format", "json",
-                "--mcp-config", "/home/appuser/sandbox/.mcp.json",
-                "--model", "claude-sonnet-4-6",
-                "--system-prompt", SYSTEM_PROMPT,
-                "--", "What is the status?"],
-            cwd="/home/appuser/sandbox",
-            capture_output=True,
-            text=True,
-            timeout=600,
-            env={
-                **os.environ,
-                "CLAUDE_CONFIG_DIR": "/home/appuser",
-                "HOME": "/home/appuser",
-                "ANTHROPIC_API_KEY": DYNAMIC_AGENT_KEY,
-            }
-        )
+        assert mock_run.call_count == 2
+        assert mock_run.call_args_list[0] == (expected_call, expected_kwargs)
 
 
 def test_fastapi_endpoint_authorized_claude_error():
