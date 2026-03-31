@@ -40,21 +40,24 @@ FORBIDDEN_ENV_VARS = {
     ],
     "mcp-server": [
         "ANTHROPIC_API_KEY",
-        "TESTER_API_TOKEN",       # tester-server token must not reach plan-server
-        "PLAN_API_TOKEN",         # plan-server token must not reach tester-server
+        "TESTER_API_TOKEN",       # tester-server token must not reach mcp-server
+        "PLAN_API_TOKEN",         # plan-server token must not reach mcp-server
         "GIT_API_TOKEN",          # git-server token must not reach mcp-server
+        "LOG_API_TOKEN",          # log-server token must not reach mcp-server
     ],
     "plan-server": [
         "ANTHROPIC_API_KEY",
         "MCP_API_TOKEN",          # mcp-server token must not reach plan-server
         "TESTER_API_TOKEN",       # tester-server token must not reach plan-server
         "GIT_API_TOKEN",          # git-server token must not reach plan-server
+        "LOG_API_TOKEN",          # log-server token must not reach plan-server
     ],
     "tester-server": [
         "ANTHROPIC_API_KEY",
         "MCP_API_TOKEN",          # mcp-server token must not reach tester-server
         "PLAN_API_TOKEN",         # plan-server token must not reach tester-server
         "GIT_API_TOKEN",          # git-server token must not reach tester-server
+        "LOG_API_TOKEN",          # log-server token must not reach tester-server
     ],
     "proxy": [
         "MCP_API_TOKEN",          # Internal MCP auth, not for proxy
@@ -80,6 +83,16 @@ FORBIDDEN_ENV_VARS = {
         "PLAN_API_TOKEN",         # plan-server token must not reach git-server
         "TESTER_API_TOKEN",       # tester-server token must not reach git-server
         "CLAUDE_API_TOKEN",       # Ingress auth, not for git-server
+        "LOG_API_TOKEN",          # log-server token must not reach git-server
+    ],
+    "log-server": [
+        "ANTHROPIC_API_KEY",      # Real key, not for log-server
+        "DYNAMIC_AGENT_KEY",      # Agent-side token, not for log-server
+        "MCP_API_TOKEN",          # mcp-server token must not reach log-server
+        "PLAN_API_TOKEN",         # plan-server token must not reach log-server
+        "TESTER_API_TOKEN",       # tester-server token must not reach log-server
+        "GIT_API_TOKEN",          # git-server token must not reach log-server
+        "CLAUDE_API_TOKEN",       # Ingress auth, not for log-server
     ],
 }
 
@@ -93,9 +106,13 @@ REQUIRED_ENV_VARS = {
         "CLAUDE_API_TOKEN",       # For ingress auth via Caddy
         "ANTHROPIC_BASE_URL",     # Points to proxy:4000
         "GIT_API_TOKEN",          # For authenticating to git-server
+        "LOG_API_TOKEN",          # For authenticating to log-server
     ],
     "git-server": [
         "GIT_API_TOKEN",
+    ],
+    "log-server": [
+        "LOG_API_TOKEN",
     ],
     "mcp-server": [
         "MCP_API_TOKEN",
