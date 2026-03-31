@@ -4,11 +4,15 @@ import json
 import logging
 import secrets
 import subprocess
+import threading
+import time
+from datetime import datetime, timezone
+import requests
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 import setuplogging
-from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN, GIT_API_TOKEN, SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT
+from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN, GIT_API_TOKEN, LOG_SERVER_URL, LOG_API_TOKEN, SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT
 from verify_isolation import verify_all
 
 logger = logging.getLogger(__name__)
@@ -32,7 +36,7 @@ def _validate_model(model: str) -> str:
     return model
 
 _SECRET_TOKENS = [
-    t for t in [CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN, GIT_API_TOKEN]
+    t for t in [CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN, GIT_API_TOKEN, LOG_API_TOKEN]
     if t
 ]
 _SECRET_RE = re.compile("|".join(re.escape(t) for t in _SECRET_TOKENS)) if _SECRET_TOKENS else None
@@ -43,6 +47,41 @@ def _redact_secrets(text: str) -> str:
     if _SECRET_RE is None or not isinstance(text, str):
         return text
     return _SECRET_RE.sub("[REDACTED]", text)
+
+_LOG_CA_BUNDLE = "/app/certs/ca.crt"
+
+
+def _emit_log_event(event: dict) -> None:
+    """POST one log event to log-server. Runs in a daemon thread; failures are non-fatal."""
+    if not LOG_SERVER_URL or not LOG_API_TOKEN:
+        return
+    try:
+        requests.post(
+            f"{LOG_SERVER_URL}/ingest",
+            json=event,
+            headers={"Authorization": f"Bearer {LOG_API_TOKEN}"},
+            verify=_LOG_CA_BUNDLE,
+            timeout=5,
+        )
+    except Exception as exc:
+        logger.warning(f"Log emission failed (non-critical): {exc}")
+
+
+def _log_llm_call(session_id: str, model: str, parsed: dict, duration_ms: int) -> None:
+    """Extract token counts from claude JSON output and fire-and-forget to log-server."""
+    usage = parsed.get("usage") or {}
+    event = {
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "session_id": session_id,
+        "event_type": "llm_call",
+        "model": model,
+        "input_tokens": usage.get("input_tokens", 0),
+        "output_tokens": usage.get("output_tokens", 0),
+        "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
+        "duration_ms": duration_ms,
+    }
+    threading.Thread(target=_emit_log_event, args=(event,), daemon=True).start()
+
 
 PATH_BLACKLIST = [
     "\0",
@@ -156,7 +195,9 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
     logger.info(f"Received authenticated query: {request.query} for model: {request.model}")
     _validate_model(request.model)
     query = _expand_slash_command(request.query)
+    session_id = secrets.token_hex(8)
     try:
+        t0 = time.monotonic()
         result = subprocess.run(
             [
                 "claude", "--print", "--dangerously-skip-permissions",
@@ -176,6 +217,7 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
                 "ANTHROPIC_API_KEY": DYNAMIC_AGENT_KEY,
             }
         )
+        duration_ms = int((time.monotonic() - t0) * 1000)
 
         logger.debug(f"stdout: {_redact_secrets(result.stdout)!r}")
         logger.debug(f"stderr: {_redact_secrets(result.stderr)!r}")
@@ -193,6 +235,7 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
                 error_text = parsed.get("result", "Unknown error")
                 _check_upstream_errors(error_text)
                 return {"error": error_text}
+            _log_llm_call(parsed.get("session_id") or session_id, request.model, parsed, duration_ms)
             return {"response": parsed.get("result", "")}
         except json.JSONDecodeError:
             # fallback in case output is plain text
@@ -214,7 +257,9 @@ async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
     logger.info(f"Received planning query: {request.query} for model: {request.model}")
     _validate_model(request.model)
     query = _expand_slash_command(request.query)
+    session_id = secrets.token_hex(8)
     try:
+        t0 = time.monotonic()
         result = subprocess.run(
             [
                 "claude", "--print", "--dangerously-skip-permissions",
@@ -234,6 +279,7 @@ async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
                 "ANTHROPIC_API_KEY": DYNAMIC_AGENT_KEY,
             }
         )
+        duration_ms = int((time.monotonic() - t0) * 1000)
 
         logger.debug(f"stdout: {_redact_secrets(result.stdout)!r}")
         logger.debug(f"stderr: {_redact_secrets(result.stderr)!r}")
@@ -251,6 +297,7 @@ async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
                 error_text = parsed.get("result", "Unknown error")
                 _check_upstream_errors(error_text)
                 return {"error": error_text}
+            _log_llm_call(parsed.get("session_id") or session_id, request.model, parsed, duration_ms)
             return {"response": parsed.get("result", "")}
         except json.JSONDecodeError:
             return {"response": result.stdout.strip()}

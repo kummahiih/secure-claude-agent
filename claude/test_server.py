@@ -1,7 +1,7 @@
 import os
 import sys
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # Mock out modules that require runtime environment / side-effects before importing server
 sys.modules.setdefault("setuplogging", MagicMock())
@@ -13,6 +13,8 @@ sys.modules["runenv"] = MagicMock(
     PLAN_API_TOKEN="dummy-plan-token",
     TESTER_API_TOKEN="dummy-tester-token",
     GIT_API_TOKEN="dummy-git-token",
+    LOG_SERVER_URL="https://log-server:8443",
+    LOG_API_TOKEN="dummy-log-token",
     SYSTEM_PROMPT="test system prompt",
     PLAN_SYSTEM_PROMPT="test plan system prompt",
 )
@@ -196,3 +198,85 @@ class TestQueryRequestValidation:
         from server import QueryRequest
         with pytest.raises(ValidationError):
             QueryRequest(query="q", model="m" * 201)
+
+
+class TestLogEmission:
+    def test_emit_log_event_returns_early_when_no_url(self, monkeypatch):
+        """_emit_log_event is a no-op when LOG_SERVER_URL is empty."""
+        monkeypatch.setattr(_server_module, "LOG_SERVER_URL", "")
+        with patch("server.requests.post") as mock_post:
+            _server_module._emit_log_event({"event_type": "llm_call", "session_id": "s1"})
+        mock_post.assert_not_called()
+
+    def test_emit_log_event_returns_early_when_no_token(self, monkeypatch):
+        """_emit_log_event is a no-op when LOG_API_TOKEN is empty."""
+        monkeypatch.setattr(_server_module, "LOG_SERVER_URL", "https://log-server:8443")
+        monkeypatch.setattr(_server_module, "LOG_API_TOKEN", "")
+        with patch("server.requests.post") as mock_post:
+            _server_module._emit_log_event({"event_type": "llm_call", "session_id": "s1"})
+        mock_post.assert_not_called()
+
+    def test_emit_log_event_post_failure_is_non_fatal(self, monkeypatch):
+        """_emit_log_event logs a warning and does not raise when POST fails."""
+        monkeypatch.setattr(_server_module, "LOG_SERVER_URL", "https://log-server:8443")
+        monkeypatch.setattr(_server_module, "LOG_API_TOKEN", "dummy-log-token")
+        with patch("server.requests.post", side_effect=Exception("connection refused")):
+            # Must not raise
+            _server_module._emit_log_event({"event_type": "llm_call", "session_id": "s1"})
+
+    def test_emit_log_event_posts_with_auth_header(self, monkeypatch):
+        """_emit_log_event sends Authorization: Bearer header with LOG_API_TOKEN."""
+        monkeypatch.setattr(_server_module, "LOG_SERVER_URL", "https://log-server:8443")
+        monkeypatch.setattr(_server_module, "LOG_API_TOKEN", "dummy-log-token")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        with patch("server.requests.post", return_value=mock_resp) as mock_post:
+            _server_module._emit_log_event({"event_type": "llm_call", "session_id": "s1"})
+        mock_post.assert_called_once()
+        _, kwargs = mock_post.call_args
+        assert kwargs["headers"]["Authorization"] == "Bearer dummy-log-token"
+
+    def test_log_llm_call_fires_correct_event(self, monkeypatch):
+        """_log_llm_call extracts token counts and fires an llm_call event."""
+        captured = []
+        monkeypatch.setattr(_server_module, "_emit_log_event", captured.append)
+        parsed = {
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "cache_read_input_tokens": 20,
+            }
+        }
+        _server_module._log_llm_call("sess-abc", "claude-sonnet-4-6", parsed, 1234)
+        import time; time.sleep(0.05)
+        assert len(captured) == 1
+        ev = captured[0]
+        assert ev["event_type"] == "llm_call"
+        assert ev["session_id"] == "sess-abc"
+        assert ev["model"] == "claude-sonnet-4-6"
+        assert ev["input_tokens"] == 100
+        assert ev["output_tokens"] == 50
+        assert ev["cache_read_tokens"] == 20
+        assert ev["duration_ms"] == 1234
+
+    def test_log_llm_call_handles_missing_usage(self, monkeypatch):
+        """_log_llm_call defaults to zero tokens when usage is absent."""
+        captured = []
+        monkeypatch.setattr(_server_module, "_emit_log_event", captured.append)
+        _server_module._log_llm_call("sess-xyz", "claude-sonnet-4-6", {}, 500)
+        import time; time.sleep(0.05)
+        assert len(captured) == 1
+        ev = captured[0]
+        assert ev["input_tokens"] == 0
+        assert ev["output_tokens"] == 0
+        assert ev["cache_read_tokens"] == 0
+
+    def test_log_llm_call_event_has_timestamp(self, monkeypatch):
+        """_log_llm_call includes a timestamp field in the emitted event."""
+        captured = []
+        monkeypatch.setattr(_server_module, "_emit_log_event", captured.append)
+        _server_module._log_llm_call("sess-ts", "claude-sonnet-4-6", {}, 0)
+        import time; time.sleep(0.05)
+        assert len(captured) == 1
+        assert "timestamp" in captured[0]
+        assert captured[0]["timestamp"].endswith("Z")
