@@ -189,61 +189,94 @@ async def health_check():
     return {"status": "ok"}
 
 
+_DONE_MARKER = "DONE"
+_MAX_TASK_ITERATIONS = 50
+
+
+def _run_subagent(query: str, model: str, system_prompt: str) -> tuple[dict, int]:
+    """Spawn one claude --print subprocess and return (parsed_output, duration_ms)."""
+    t0 = time.monotonic()
+    result = subprocess.run(
+        [
+            "claude", "--print", "--dangerously-skip-permissions",
+            "--output-format", "json",
+            "--mcp-config", "/home/appuser/sandbox/.mcp.json",
+            "--model", model,
+            "--system-prompt", system_prompt,
+            "--", query,
+        ],
+        cwd="/home/appuser/sandbox",
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env={
+            **os.environ,
+            "CLAUDE_CONFIG_DIR": "/home/appuser",
+            "HOME": "/home/appuser",
+            "ANTHROPIC_API_KEY": DYNAMIC_AGENT_KEY,
+        },
+    )
+    duration_ms = int((time.monotonic() - t0) * 1000)
+    logger.debug(f"stdout: {_redact_secrets(result.stdout)!r}")
+    logger.debug(f"stderr: {_redact_secrets(result.stderr)!r}")
+    logger.debug(f"returncode: {result.returncode}")
+    logger.info(
+        f"Subagent completed: returncode={result.returncode} "
+        f"stdout_bytes={len(result.stdout)} stderr_bytes={len(result.stderr)}"
+    )
+    return result, duration_ms
+
+
 @app.post("/ask")
 async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
-    """External endpoint routed through Caddy, secured with Bearer token."""
+    """External endpoint routed through Caddy, secured with Bearer token.
+
+    Loops through plan tasks, spawning a fresh claude --print subagent per task.
+    Each subagent executes exactly one task then exits. The loop stops when the
+    subagent outputs DONE (no remaining tasks) or on error.
+    """
     logger.info(f"Received authenticated query: {request.query} for model: {request.model}")
     _validate_model(request.model)
     query = _expand_slash_command(request.query)
-    session_id = secrets.token_hex(8)
+
+    task_responses: list[str] = []
+
     try:
-        t0 = time.monotonic()
-        result = subprocess.run(
-            [
-                "claude", "--print", "--dangerously-skip-permissions",
-                "--output-format", "json",
-                "--mcp-config", "/home/appuser/sandbox/.mcp.json",
-                "--model", request.model,
-                "--system-prompt", SYSTEM_PROMPT,
-                "--", query],
-            cwd="/home/appuser/sandbox",
-            capture_output=True,
-            text=True,
-            timeout=600,
-            env={
-                **os.environ,
-                "CLAUDE_CONFIG_DIR": "/home/appuser",
-                "HOME": "/home/appuser",
-                "ANTHROPIC_API_KEY": DYNAMIC_AGENT_KEY,
-            }
-        )
-        duration_ms = int((time.monotonic() - t0) * 1000)
+        for iteration in range(_MAX_TASK_ITERATIONS):
+            logger.info(f"Spawning subagent iteration {iteration + 1}/{_MAX_TASK_ITERATIONS}")
+            session_id = secrets.token_hex(8)
 
-        logger.debug(f"stdout: {_redact_secrets(result.stdout)!r}")
-        logger.debug(f"stderr: {_redact_secrets(result.stderr)!r}")
-        logger.debug(f"returncode: {result.returncode}")
-        logger.info(f"Claude Code completed: returncode={result.returncode} stdout_bytes={len(result.stdout)} stderr_bytes={len(result.stderr)}")
+            result, duration_ms = _run_subagent(query, request.model, SYSTEM_PROMPT)
 
-        if result.returncode != 0:
-            logger.error(f"Claude Code exited with error: {_redact_secrets(result.stderr)}")
-            _check_upstream_errors(result.stderr)
-            return {"error": result.stderr}
+            if result.returncode != 0:
+                logger.error(f"Subagent exited with error: {_redact_secrets(result.stderr)}")
+                _check_upstream_errors(result.stderr)
+                return {"error": result.stderr, "responses": task_responses}
 
-        try:
-            parsed = json.loads(result.stdout)
-            if parsed.get("is_error"):
-                error_text = parsed.get("result", "Unknown error")
-                _check_upstream_errors(error_text)
-                return {"error": error_text}
-            _log_llm_call(parsed.get("session_id") or session_id, request.model, parsed, duration_ms)
-            return {"response": parsed.get("result", "")}
-        except json.JSONDecodeError:
-            # fallback in case output is plain text
-            return {"response": result.stdout.strip()}
+            try:
+                parsed = json.loads(result.stdout)
+                if parsed.get("is_error"):
+                    error_text = parsed.get("result", "Unknown error")
+                    _check_upstream_errors(error_text)
+                    return {"error": error_text, "responses": task_responses}
+                response_text = parsed.get("result", "")
+                _log_llm_call(parsed.get("session_id") or session_id, request.model, parsed, duration_ms)
+            except json.JSONDecodeError:
+                response_text = result.stdout.strip()
+
+            task_responses.append(response_text)
+
+            # Subagent signals no remaining tasks — stop the loop
+            if response_text.strip() == _DONE_MARKER:
+                logger.info("Subagent returned DONE — no more tasks.")
+                break
+
+        combined = "\n\n---\n\n".join(r for r in task_responses if r.strip() != _DONE_MARKER)
+        return {"response": combined or _DONE_MARKER}
 
     except subprocess.TimeoutExpired:
-        logger.error("Claude Code timed out.")
-        return {"error": "Agent timed out."}
+        logger.error("Subagent timed out.")
+        return {"error": "Agent timed out.", "responses": task_responses}
     except HTTPException:
         raise
     except Exception as e:
