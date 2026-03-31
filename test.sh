@@ -13,6 +13,8 @@ export DYNAMIC_AGENT_KEY="${DYNAMIC_AGENT_KEY:-dummy-agent-key}"
 export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-https://proxy:4000}"
 export GIT_API_TOKEN="${GIT_API_TOKEN:-dummy-git-token}"
 export GIT_SERVER_URL="${GIT_SERVER_URL:-https://git-server:8443}"
+export LOG_API_TOKEN="${LOG_API_TOKEN:-dummy-log-token}"
+export LOG_SERVER_URL="${LOG_SERVER_URL:-https://log-server:8443}"
 
 echo "[unit] Running Go fileserver tests..."
 (cd fileserver && GOTOOLCHAIN=local CGO_ENABLED=0 GOMAXPROCS=1 go test -p 1 -cpu 1 mcp_test.go main.go -v)
@@ -25,4 +27,4 @@ export PROMPT_SYSTEM_DIR="${SCRIPT_DIR}/prompts/system"
 export PROMPT_COMMANDS_DIR="${SCRIPT_DIR}/prompts/commands"
 
 echo "[unit] Running Python claude tests..."
-(cd claude && python -m pytest claude_tests.py files_mcp_test.py test_isolation.py git_mcp_test.py tester_mcp_test.py test_server.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
+(cd claude && python -m pytest claude_tests.py files_mcp_test.py test_isolation.py git_mcp_test.py tester_mcp_test.py log_mcp_test.py test_server.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
