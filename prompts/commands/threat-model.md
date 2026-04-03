@@ -1,5 +1,9 @@
 # Generate Threat Model and Prioritized Fixes
 
+If `docs/THREAT_MODEL.md` is the most recent change on edit history print only `DONE` and stop.
+Othervice proceed futher on this document.
+
+
 **Role:** You are an expert application security engineer.
 
 **Objective:** Generate a comprehensive threat model based on the project's architecture, including a prioritized list of security fixes.

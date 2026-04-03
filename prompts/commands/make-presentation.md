@@ -1,5 +1,8 @@
 # Presentation Slide Outline: Secure AI Agent Reference Architecture
 
+If `docs/PRESENTATION_OUTLINE.md` is the most recent change on edit history print only `DONE` and stop.
+Othervice proceed futher on this document.
+
 Generate a concise slide outline (10-15 slides) for presenting secure-claude to engineering leadership. Frame this as a reference architecture for deploying autonomous AI agents securely.
 
 ## Input Sources
@@ -8,6 +11,7 @@ Read these using the available MCP tools before writing:
 
 First, check if the threat model and architecture docs already exist:
 - `read_workspace_file` on `docs/THREAT_MODEL.md` — output of `/threat-model`
+- `read_workspace_file` on `docs/TOKEN_MODEL.md` — output of `/token-model`
 - `read_workspace_file` on `docs/ARCHITECTURE.md` — output of `/architecture-doc`
 
 If those exist, use them as primary sources. If not, read the raw documentation:

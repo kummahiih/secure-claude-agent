@@ -1,5 +1,8 @@
 # Generate Architecture Documentation
 
+If `docs/ARCHITECTURE.md` is the most recent change on edit history print only `DONE` and stop.
+Othervice proceed futher on this document.
+
 **Role:** You are an expert software architect.
 
 **Objective:** Explore the currently mounted workspace and generate a comprehensive architecture document. 

@@ -1,5 +1,8 @@
 # Token Consumption Analysis and Optimization
 
+If `docs/TOKEN_USE.md` is the most recent change on edit history print only `DONE` and stop.
+Othervice proceed futher on this document.
+
 **Role:** You are an expert in LLM token economics and AI agent efficiency.
 
 **Objective:** Analyze the project's token consumption patterns, identify waste, and produce a prioritized optimization plan saved to `docs/TOKEN_USE.md`.
