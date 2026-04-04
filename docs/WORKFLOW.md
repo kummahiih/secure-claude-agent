@@ -10,9 +10,16 @@ Authoritative source: [`prompts/system/ask.md`](../prompts/system/ask.md).
 ## Step-by-step
 
 ```
-1. plan_current
+             server.py pre-checks plan-server GET /current
+                    │
+                    ├─ no active plan (404 / exhausted) ─► single ad-hoc invocation
+                    │                                       (ADHOC_SYSTEM_PROMPT, no loop)
+                    │
+                    └─ active task exists ───────────────► subagent loop (below)
+
+1. plan_current  [loop path only]
        │
-       ├─ no active plan ──────────────────────────────► execute query directly
+       ├─ no active plan ──────────────────────────────► output DONE and stop
        │
        └─ task exists
               │
