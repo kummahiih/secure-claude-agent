@@ -1,431 +1,401 @@
 """
-verify_isolation.py — Runtime isolation checks for secure-claude containers.
+test_isolation.py — Unit tests for verify_isolation.py
 
-Call verify_all() at daemon startup. It fails hard (sys.exit(1)) if any
-structural security invariant is violated.
+Tests cover:
+- FORBIDDEN_ENV_VARS checks per role
+- REQUIRED_ENV_VARS checks per role
+- FORBIDDEN_PATHS checks per role
+- .env file scanner
+- Workspace entry whitelist
+- .git parent leak check
+- MCP config validation
+- Unknown role handling
+- Full-pass happy paths
 
-IMPORTANT: This must only run at the entrypoint/daemon level, NEVER inside
-MCP subprocess children (e.g., files_mcp.py). Claude Code passes
-ANTHROPIC_API_KEY to its child processes, which would false-positive
-the forbidden env var check.
-
-Each container role has its own check profile:
-- claude-server: must not see real API key, must not see parent repo artifacts
-- proxy: must see real API key, must not see workspace or agent code
-- mcp-server: must not see real API key, must not see parent repo artifacts
-
-Usage in daemon startup (entrypoint.sh or top of server.py):
-    from verify_isolation import verify_all
-    verify_all(role="claude-server")
-
-DO NOT call from: files_mcp.py, git_mcp.py, or any MCP stdio server.
+RR-19 regression: LOG_API_TOKEN must be forbidden in proxy and caddy.
 """
 
 import os
 import sys
-import logging
+import pytest
+from unittest.mock import patch
 
-logger = logging.getLogger("verify_isolation")
-
-
-# --- Env var checks ---
-
-# These env vars must NEVER appear in the container at entrypoint time.
-# If they do, credential isolation has failed.
-# Note: ANTHROPIC_API_KEY will later be injected into the Claude Code
-# subprocess scope by server.py — but at entrypoint time it must not exist.
-FORBIDDEN_ENV_VARS = {
-    "claude-server": [
-        "ANTHROPIC_API_KEY",  # Real key — only proxy should have this
-    ],
-    "mcp-server": [
-        "ANTHROPIC_API_KEY",
-    ],
-    "plan-server": [
-        "ANTHROPIC_API_KEY",
-        "MCP_API_TOKEN",          # mcp-server token must not reach plan-server
-        "TESTER_API_TOKEN",       # tester-server token must not reach plan-server
-    ],
-    "tester-server": [
-        "ANTHROPIC_API_KEY",
-        "MCP_API_TOKEN",          # mcp-server token must not reach tester-server
-        "PLAN_API_TOKEN",         # plan-server token must not reach tester-server
-    ],
-    "proxy": [
-        "MCP_API_TOKEN",          # Internal MCP auth, not for proxy
-        "PLAN_API_TOKEN",         # Internal plan auth, not for proxy
-        "TESTER_API_TOKEN",       # Internal tester auth, not for proxy
-        "CLAUDE_API_TOKEN",       # Ingress auth, not for proxy
-    ],
-    "caddy": [
-        "ANTHROPIC_API_KEY",      # Real key, not for caddy
-        "DYNAMIC_AGENT_KEY",      # Agent-side token, not for caddy
-        "MCP_API_TOKEN",          # Internal MCP auth, not for caddy
-        "PLAN_API_TOKEN",         # Internal plan auth, not for caddy
-        "TESTER_API_TOKEN",       # Internal tester auth, not for caddy
-        "CLAUDE_API_TOKEN",       # Ingress auth handled via Caddyfile, not env
-        "AGENT_API_TOKEN",        # Auth is handled by claude-server, not Caddy
-    ],
-}
-
-# These env vars MUST be present for the container to function correctly.
-REQUIRED_ENV_VARS = {
-    "claude-server": [
-        "DYNAMIC_AGENT_KEY",      # Ephemeral key, renamed to ANTHROPIC_API_KEY in subprocess
-        "MCP_API_TOKEN",          # For authenticating to mcp-server
-        "PLAN_API_TOKEN",         # For authenticating to plan-server
-        "TESTER_API_TOKEN",       # For authenticating to tester-server
-        "CLAUDE_API_TOKEN",       # For ingress auth via Caddy
-        "ANTHROPIC_BASE_URL",     # Points to proxy:4000
-    ],
-    "mcp-server": [
-        "MCP_API_TOKEN",
-    ],
-    "plan-server": [
-        "PLAN_API_TOKEN",
-    ],
-    "tester-server": [
-        "TESTER_API_TOKEN",
-    ],
-    "proxy": [
-        "ANTHROPIC_API_KEY",      # Real key for upstream
-        "DYNAMIC_AGENT_KEY",      # Virtual key validation
-    ],
-    "caddy": [
-    ],
-}
+import verify_isolation
+from verify_isolation import verify_all
 
 
-# --- Filesystem checks ---
+# ---------------------------------------------------------------------------
+# Helpers / fixtures
+# ---------------------------------------------------------------------------
 
-# Files/dirs that must NOT exist in the container image or at runtime.
-# Presence means secrets or parent repo artifacts leaked into the image.
-FORBIDDEN_PATHS = {
-    "claude-server": [
+@pytest.fixture
+def clean_env_mcp_server():
+    """Env vars that a correctly configured mcp-server would have."""
+    return {"MCP_API_TOKEN": "dummy"}
+
+
+@pytest.fixture
+def clean_env_caddy():
+    """Env vars that a correctly configured caddy would have."""
+    return {}
+
+
+@pytest.fixture
+def clean_env_proxy():
+    """Env vars that a correctly configured proxy would have."""
+    return {
+        "ANTHROPIC_API_KEY": "sk-real-key",
+        "DYNAMIC_AGENT_KEY": "dummy-dynamic",
+    }
+
+
+@pytest.fixture
+def clean_env_claude_server():
+    """Env vars that a correctly configured claude-server would have."""
+    return {
+        "DYNAMIC_AGENT_KEY": "dummy-dynamic",
+        "MCP_API_TOKEN": "dummy-mcp",
+        "PLAN_API_TOKEN": "dummy-plan",
+        "TESTER_API_TOKEN": "dummy-tester",
+        "CLAUDE_API_TOKEN": "dummy-claude",
+        "ANTHROPIC_BASE_URL": "https://proxy:4000",
+        "GIT_API_TOKEN": "dummy-git",
+        "LOG_API_TOKEN": "dummy-log",
+    }
+
+
+def _required_paths_for(role):
+    """Return a dict mapping each required path to True (exists) for the role."""
+    return {p: True for p in verify_isolation.REQUIRED_PATHS.get(role, [])}
+
+
+# ---------------------------------------------------------------------------
+# TestForbiddenEnvVars
+# ---------------------------------------------------------------------------
+
+class TestForbiddenEnvVars:
+    """Verify that forbidden env vars are detected and cause exit(1)."""
+
+    def _run_with_env(self, role, extra_env):
+        """Run verify_all for role with only the given env vars set."""
+        with patch.dict(os.environ, extra_env, clear=True), \
+             patch("os.path.exists", return_value=False), \
+             patch("verify_isolation.find_env_files", return_value=[]):
+            with pytest.raises(SystemExit):
+                verify_all(role)
+
+    def test_claude_server_rejects_real_api_key(self):
+        self._run_with_env("claude-server", {"ANTHROPIC_API_KEY": "sk-real"})
+
+    def test_mcp_server_rejects_real_api_key(self):
+        self._run_with_env("mcp-server", {"ANTHROPIC_API_KEY": "sk-real"})
+
+    def test_proxy_rejects_mcp_token(self):
+        self._run_with_env("proxy", {"MCP_API_TOKEN": "tok", "ANTHROPIC_API_KEY": "key", "DYNAMIC_AGENT_KEY": "dkey"})
+
+    def test_proxy_rejects_claude_api_token(self):
+        self._run_with_env("proxy", {"CLAUDE_API_TOKEN": "tok", "ANTHROPIC_API_KEY": "key", "DYNAMIC_AGENT_KEY": "dkey"})
+
+    def test_proxy_rejects_git_api_token(self):
+        self._run_with_env("proxy", {"GIT_API_TOKEN": "tok", "ANTHROPIC_API_KEY": "key", "DYNAMIC_AGENT_KEY": "dkey"})
+
+    def test_proxy_rejects_log_api_token(self):
+        """RR-19: LOG_API_TOKEN must be forbidden in proxy."""
+        self._run_with_env("proxy", {"LOG_API_TOKEN": "tok", "ANTHROPIC_API_KEY": "key", "DYNAMIC_AGENT_KEY": "dkey"})
+
+    def test_proxy_allows_real_api_key(self):
+        """ANTHROPIC_API_KEY is required (not forbidden) in proxy."""
+        assert "ANTHROPIC_API_KEY" not in verify_isolation.FORBIDDEN_ENV_VARS.get("proxy", [])
+
+    def test_caddy_rejects_all_backend_tokens(self):
+        for token in ["ANTHROPIC_API_KEY", "MCP_API_TOKEN", "PLAN_API_TOKEN",
+                      "TESTER_API_TOKEN", "GIT_API_TOKEN"]:
+            self._run_with_env("caddy", {token: "tok"})
+
+    def test_caddy_rejects_log_api_token(self):
+        """RR-19: LOG_API_TOKEN must be forbidden in caddy."""
+        self._run_with_env("caddy", {"LOG_API_TOKEN": "tok"})
+
+    def test_log_api_token_in_proxy_forbidden_list(self):
+        """Structural: LOG_API_TOKEN must appear in FORBIDDEN_ENV_VARS['proxy']."""
+        assert "LOG_API_TOKEN" in verify_isolation.FORBIDDEN_ENV_VARS["proxy"], \
+            "RR-19 fix missing: LOG_API_TOKEN must be forbidden in proxy"
+
+    def test_log_api_token_in_caddy_forbidden_list(self):
+        """Structural: LOG_API_TOKEN must appear in FORBIDDEN_ENV_VARS['caddy']."""
+        assert "LOG_API_TOKEN" in verify_isolation.FORBIDDEN_ENV_VARS["caddy"], \
+            "RR-19 fix missing: LOG_API_TOKEN must be forbidden in caddy"
+
+
+# ---------------------------------------------------------------------------
+# TestRequiredEnvVars
+# ---------------------------------------------------------------------------
+
+class TestRequiredEnvVars:
+    """Verify that missing required env vars cause exit(1)."""
+
+    def _run_missing(self, role, env_without):
+        """Run verify_all for role with env_without removed."""
+        required_vars = verify_isolation.REQUIRED_ENV_VARS.get(role, [])
+        env = {k: "dummy" for k in required_vars if k != env_without}
+        with patch.dict(os.environ, env, clear=True), \
+             patch("os.path.exists", return_value=False), \
+             patch("verify_isolation.find_env_files", return_value=[]):
+            with pytest.raises(SystemExit):
+                verify_all(role)
+
+    def test_claude_server_missing_dynamic_key(self):
+        self._run_missing("claude-server", "DYNAMIC_AGENT_KEY")
+
+    def test_claude_server_missing_mcp_token(self):
+        self._run_missing("claude-server", "MCP_API_TOKEN")
+
+    def test_claude_server_missing_claude_api_token(self):
+        self._run_missing("claude-server", "CLAUDE_API_TOKEN")
+
+    def test_claude_server_missing_base_url(self):
+        self._run_missing("claude-server", "ANTHROPIC_BASE_URL")
+
+    def test_claude_server_missing_git_api_token(self):
+        self._run_missing("claude-server", "GIT_API_TOKEN")
+
+    def test_claude_server_missing_log_api_token(self):
+        self._run_missing("claude-server", "LOG_API_TOKEN")
+
+    def test_mcp_server_missing_mcp_token(self):
+        self._run_missing("mcp-server", "MCP_API_TOKEN")
+
+    def test_proxy_missing_api_key(self):
+        self._run_missing("proxy", "ANTHROPIC_API_KEY")
+
+
+# ---------------------------------------------------------------------------
+# TestForbiddenPaths
+# ---------------------------------------------------------------------------
+
+class TestForbiddenPaths:
+    """Verify that forbidden filesystem paths cause exit(1)."""
+
+    @pytest.mark.parametrize("path", [
         "/app/.secrets.env",
         "/app/.cluster_tokens.env",
-        "/app/docker-compose.yml",
-        "/app/proxy_config.yaml",
-        "/app/Caddyfile",
         "/workspace/.secrets.env",
-        "/workspace/.cluster_tokens.env",
         "/workspace/docker-compose.yml",
-        "/workspace/proxy_config.yaml",
-        "/workspace/Caddyfile",
         "/workspace/Dockerfile.claude",
-        "/workspace/Dockerfile.mcp",
-        "/workspace/Dockerfile.proxy",
-        "/workspace/Dockerfile.caddy",
         "/workspace/certs",
-    ],
-    "mcp-server": [
-        "/workspace/.secrets.env",
-        "/workspace/.cluster_tokens.env",
-        "/workspace/docker-compose.yml",
         "/workspace/proxy_config.yaml",
-        "/workspace/Dockerfile.claude",
-        "/workspace/Dockerfile.mcp",
-        "/workspace/Dockerfile.proxy",
-        "/workspace/Dockerfile.caddy",
-        "/workspace/certs",
-    ],
-    "plan-server": [
-        "/app/.secrets.env",
-        "/app/.cluster_tokens.env",
-        "/app/docker-compose.yml",
-        "/plans/.secrets.env",
-    ],
-    "tester-server": [
-        "/app/.secrets.env",
-        "/app/.cluster_tokens.env",
-        "/app/docker-compose.yml",
-        "/workspace/.secrets.env",
-        "/workspace/.cluster_tokens.env",
-    ],
-    "proxy": [
-        # Proxy must not have agent code or workspace
+    ])
+    def test_claude_server_rejects_forbidden_path(self, path):
+        def exists(p):
+            return p == path
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("os.path.exists", side_effect=exists), \
+             patch("verify_isolation.find_env_files", return_value=[]):
+            with pytest.raises(SystemExit):
+                verify_all("claude-server")
+
+    @pytest.mark.parametrize("path", [
         "/app/server.py",
         "/app/files_mcp.py",
         "/workspace",
-    ],
-    "caddy": [
-        # Caddy must not have agent code, proxy config, or workspace
-        "/app",
-        "/workspace",
-    ],
-}
+    ])
+    def test_proxy_rejects_forbidden_path(self, path):
+        def exists(p):
+            return p == path
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k", "DYNAMIC_AGENT_KEY": "d"}, clear=True), \
+             patch("os.path.exists", side_effect=exists), \
+             patch("verify_isolation.find_env_files", return_value=[]):
+            with pytest.raises(SystemExit):
+                verify_all("proxy")
 
-# Files/dirs that MUST exist — sanity check that mounts and copies are correct.
-REQUIRED_PATHS = {
-    "claude-server": [
-        "/app/server.py",
-        "/app/files_mcp.py",
-        "/app/verify_isolation.py",
-        "/app/prompts",                        # System prompts (root-owned, read-only)
-        "/home/appuser/.claude/commands",       # Slash commands (root-owned, read-only)
-        "/home/appuser/sandbox/.mcp.json",  # MCP config baked into image
-    ],
-    "mcp-server": [
-        "/workspace",
-    ],
-    "proxy": [
-        "/app/certs/proxy.crt",
-        "/app/certs/proxy.key",
-    ],
-    "caddy": [
-        "/etc/caddy/certs/caddy.crt",
-        "/etc/caddy/certs/caddy.key",
-        "/etc/caddy/certs/ca.crt",
-    ],
-    "plan-server": [
-        "/app",
-    ],
-    "tester-server": [
-        "/app",
-    ],
-}
-
-# /workspace must contain ONLY these top-level entries in mcp-server.
-# Anything else means parent repo content leaked through the mount.
-# Note: claude-server doesn't mount /workspace, so this only applies to mcp-server.
-WORKSPACE_ALLOWED_ENTRIES = {"claude", "fileserver", ".git", ".gitignore", "README.md", "LICENSE"}
+    @pytest.mark.parametrize("path", ["/app", "/workspace"])
+    def test_caddy_rejects_forbidden_path(self, path):
+        def exists(p):
+            return p == path
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("os.path.exists", side_effect=exists), \
+             patch("verify_isolation.find_env_files", return_value=[]):
+            with pytest.raises(SystemExit):
+                verify_all("caddy")
 
 
-# --- .env file scanner ---
+# ---------------------------------------------------------------------------
+# TestEnvFileScanner
+# ---------------------------------------------------------------------------
 
-def find_env_files(search_roots: list[str]) -> list[str]:
-    """Walk search_roots and return paths to any .env files found."""
-    found = []
-    for root_dir in search_roots:
-        if not os.path.isdir(root_dir):
-            continue
-        for dirpath, _dirnames, filenames in os.walk(root_dir):
-            for f in filenames:
-                if f.endswith(".env") or f == ".env":
-                    found.append(os.path.join(dirpath, f))
-    return found
+class TestEnvFileScanner:
+    def test_finds_env_files(self, tmp_path):
+        env_file = tmp_path / ".secrets.env"
+        env_file.write_text("SECRET=bad")
+        found = verify_isolation.find_env_files([str(tmp_path)])
+        assert str(env_file) in found
 
-
-# Directories to scan for .env files per role.
-ENV_FILE_SCAN_DIRS = {
-    "claude-server": ["/app", "/home/appuser"],
-    "mcp-server": ["/workspace", "/app"],
-    "proxy": ["/app"],
-    "caddy": ["/etc/caddy"],
-    "plan-server": ["/plans", "/app"],
-    "tester-server": ["/workspace", "/app"],
-}
+    def test_ignores_nonexistent_dirs(self):
+        found = verify_isolation.find_env_files(["/nonexistent/path/xyz"])
+        assert found == []
 
 
-# --- Parent .git leak check ---
+# ---------------------------------------------------------------------------
+# TestWorkspaceEntries
+# ---------------------------------------------------------------------------
 
-def check_git_no_parent_leak(workspace: str = "/workspace") -> list[str]:
-    """
-    Verify that .git inside /workspace does not reference the parent repo.
+class TestWorkspaceEntries:
+    def test_clean_workspace_passes(self):
+        clean_entries = list(verify_isolation.WORKSPACE_ALLOWED_ENTRIES)
+        required = set(verify_isolation.REQUIRED_PATHS.get("mcp-server", []))
+        def exists_mcp(p):
+            return p in required
+        with patch.dict(os.environ, {"MCP_API_TOKEN": "dummy"}, clear=True), \
+             patch("os.path.exists", side_effect=exists_mcp), \
+             patch("os.path.isdir", return_value=True), \
+             patch("os.listdir", return_value=clean_entries), \
+             patch("verify_isolation.find_env_files", return_value=[]), \
+             patch("verify_isolation.check_git_no_parent_leak", return_value=[]):
+            # Should not raise
+            try:
+                verify_all("mcp-server")
+            except SystemExit:
+                pytest.fail("verify_all raised SystemExit for clean workspace")
 
-    In a proper submodule mount, .git should either be:
-    - A directory (detached submodule clone), OR
-    - A file pointing to a .git dir within the same mount
+    def test_workspace_with_docker_compose_fails(self):
+        dirty_entries = list(verify_isolation.WORKSPACE_ALLOWED_ENTRIES) + ["docker-compose.yml"]
+        with patch.dict(os.environ, {"MCP_API_TOKEN": "dummy"}, clear=True), \
+             patch("os.path.exists", return_value=True), \
+             patch("os.path.isdir", return_value=True), \
+             patch("os.listdir", return_value=dirty_entries), \
+             patch("verify_isolation.find_env_files", return_value=[]), \
+             patch("verify_isolation.check_git_no_parent_leak", return_value=[]):
+            with pytest.raises(SystemExit):
+                verify_all("mcp-server")
 
-    It must NOT be a gitfile pointing outside /workspace (e.g., ../.git/modules/...).
-    """
-    errors = []
-    git_path = os.path.join(workspace, ".git")
-
-    if not os.path.exists(git_path):
-        # No .git at all — might be fine depending on setup
-        return errors
-
-    if os.path.isfile(git_path):
-        # It's a gitfile — read it and check the target
-        try:
-            content = open(git_path).read().strip()
-            if content.startswith("gitdir:"):
-                target = content.split("gitdir:", 1)[1].strip()
-                # Resolve relative to workspace
-                resolved = os.path.normpath(os.path.join(workspace, target))
-                if not resolved.startswith(workspace):
-                    errors.append(
-                        f".git gitfile points outside workspace: {target} -> {resolved}"
-                    )
-        except OSError as e:
-            errors.append(f"Cannot read .git file: {e}")
-
-    return errors
-
-
-# --- MCP config validation ---
-
-def check_mcp_config(config_path: str) -> list[str]:
-    """Verify MCP config file exists and has valid structure."""
-    import json
-    errors = []
-    if not os.path.exists(config_path):
-        errors.append(f"MCP config missing: {config_path}")
-        return errors
-    try:
-        with open(config_path) as f:
-            config = json.load(f)
-        if "mcpServers" not in config:
-            errors.append(f"MCP config missing 'mcpServers' key: {config_path}")
-        elif "fileserver" not in config["mcpServers"]:
-            errors.append(f"MCP config missing 'fileserver' entry: {config_path}")
-    except (json.JSONDecodeError, OSError) as e:
-        errors.append(f"MCP config invalid: {config_path}: {e}")
-    return errors
-
-PROMPT_DIRS_DEFAULT = ["/app/prompts", "/home/appuser/.claude/commands"]
+    def test_workspace_with_secrets_dir_fails(self):
+        dirty_entries = list(verify_isolation.WORKSPACE_ALLOWED_ENTRIES) + [".secrets.env"]
+        with patch.dict(os.environ, {"MCP_API_TOKEN": "dummy"}, clear=True), \
+             patch("os.path.exists", return_value=True), \
+             patch("os.path.isdir", return_value=True), \
+             patch("os.listdir", return_value=dirty_entries), \
+             patch("verify_isolation.find_env_files", return_value=[]), \
+             patch("verify_isolation.check_git_no_parent_leak", return_value=[]):
+            with pytest.raises(SystemExit):
+                verify_all("mcp-server")
 
 
-def check_prompt_immutability(prompt_dirs: list[str] | None = None) -> list[str]:
-    """
-    Verify prompt files and their directories are read-only and root-owned.
+# ---------------------------------------------------------------------------
+# TestGitParentLeak
+# ---------------------------------------------------------------------------
 
-    Both the system prompts dir and slash commands dir must be:
-    - Owned by root (UID 0) — prevents appuser from deleting/creating entries
-    - Not writable by owner — prevents modification even if ownership check
-      is somehow bypassed
+class TestGitParentLeak:
+    def test_no_git_at_all_is_fine(self, tmp_path):
+        errors = verify_isolation.check_git_no_parent_leak(str(tmp_path))
+        assert errors == []
 
-    This blocks the agent from modifying its own system prompts or injecting
-    new slash commands at runtime.
+    def test_git_directory_is_safe(self, tmp_path):
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+        errors = verify_isolation.check_git_no_parent_leak(str(tmp_path))
+        assert errors == []
 
-    Args:
-        prompt_dirs: Directories to check. Defaults to PROMPT_DIRS_DEFAULT
-                     (Docker paths). Tests pass custom temp directories.
-    """
-    import stat
+    def test_gitfile_inside_workspace_is_safe(self, tmp_path):
+        git_file = tmp_path / ".git"
+        git_file.write_text(f"gitdir: {tmp_path}/.git/modules/agent")
+        errors = verify_isolation.check_git_no_parent_leak(str(tmp_path))
+        assert errors == []
 
-    if prompt_dirs is None:
-        prompt_dirs = PROMPT_DIRS_DEFAULT
-
-    errors = []
-
-    for dirpath in prompt_dirs:
-        if not os.path.isdir(dirpath):
-            errors.append(f"Prompt directory missing: {dirpath}")
-            continue
-
-        # Check directory ownership and permissions
-        st = os.stat(dirpath)
-        if st.st_uid != 0:
-            errors.append(f"Prompt directory not owned by root: {dirpath} (uid={st.st_uid})")
-        if st.st_mode & stat.S_IWUSR:
-            errors.append(f"Prompt directory is writable: {dirpath}")
-        if st.st_mode & stat.S_IWGRP:
-            errors.append(f"Prompt directory is group-writable: {dirpath}")
-        if st.st_mode & stat.S_IWOTH:
-            errors.append(f"Prompt directory is world-writable: {dirpath}")
-
-        # Check each file inside
-        for name in os.listdir(dirpath):
-            fpath = os.path.join(dirpath, name)
-            if not os.path.isfile(fpath):
-                continue
-            fst = os.stat(fpath)
-            if fst.st_uid != 0:
-                errors.append(f"Prompt file not owned by root: {fpath} (uid={fst.st_uid})")
-            if fst.st_mode & stat.S_IWUSR:
-                errors.append(f"Prompt file is writable: {fpath}")
-
-    return errors
-
-# --- Main verification ---
-
-def verify_all(role: str) -> None:
-    """
-    Run all isolation checks for the given container role.
-    Logs every violation, then exits non-zero if any were found.
-    """
-    if role not in FORBIDDEN_ENV_VARS:
-        logger.error(f"Unknown role: {role!r}. Expected one of: {list(FORBIDDEN_ENV_VARS.keys())}")
-        sys.exit(1)
-
-    violations = []
-
-    # 1. Forbidden env vars
-    for var in FORBIDDEN_ENV_VARS.get(role, []):
-        if var in os.environ:
-            violations.append(f"FORBIDDEN env var present: {var}")
-
-    # 2. Required env vars
-    for var in REQUIRED_ENV_VARS.get(role, []):
-        if var not in os.environ:
-            violations.append(f"REQUIRED env var missing: {var}")
-
-    # 3. Forbidden paths
-    for path in FORBIDDEN_PATHS.get(role, []):
-        if os.path.exists(path):
-            violations.append(f"FORBIDDEN path exists: {path}")
-
-    # 4. Required paths
-    for path in REQUIRED_PATHS.get(role, []):
-        if not os.path.exists(path):
-            violations.append(f"REQUIRED path missing: {path}")
-
-    # 5. .env file scan
-    scan_dirs = ENV_FILE_SCAN_DIRS.get(role, [])
-    env_files = find_env_files(scan_dirs)
-    for ef in env_files:
-        violations.append(f".env file found: {ef}")
-
-    # 6. Workspace entry whitelist (mcp-server only — claude-server doesn't mount /workspace)
-    if role == "mcp-server" and os.path.isdir("/workspace"):
-        entries = set(os.listdir("/workspace"))
-        unexpected = entries - WORKSPACE_ALLOWED_ENTRIES
-        if unexpected:
-            violations.append(
-                f"/workspace contains unexpected entries: {sorted(unexpected)}"
-            )
-
-    # 7. .git parent leak check (mcp-server only)
-    if role == "mcp-server":
-        git_errors = check_git_no_parent_leak("/workspace")
-        violations.extend(git_errors)
-
-    # 8. MCP config validation (claude-server only)
-    if role == "claude-server":
-        mcp_errors = check_mcp_config("/home/appuser/sandbox/.mcp.json")
-        violations.extend(mcp_errors)
-
-    # 9. Prompt immutability (claude-server only)
-    #    System prompts and slash commands must be root-owned and read-only
-    #    to prevent the agent from modifying its own instructions at runtime.
-    if role == "claude-server":
-        prompt_errors = check_prompt_immutability()
-        violations.extend(prompt_errors)
-
-    # Report
-    if violations:
-        logger.error(f"=== ISOLATION CHECK FAILED for role={role} ===")
-        for v in violations:
-            logger.error(f"  ✗ {v}")
-        logger.error(f"=== {len(violations)} violation(s) — refusing to start ===")
-        sys.exit(1)
-    else:
-        logger.info(f"Isolation checks passed for role={role} ({_count_checks(role)} checks)")
+    def test_gitfile_outside_workspace_is_violation(self, tmp_path):
+        git_file = tmp_path / ".git"
+        git_file.write_text("gitdir: ../../.git/modules/agent")
+        errors = verify_isolation.check_git_no_parent_leak(str(tmp_path))
+        assert len(errors) == 1
+        assert "outside workspace" in errors[0]
 
 
-def _count_checks(role: str) -> int:
-    """Count total number of checks performed for a role."""
-    count = 0
-    count += len(FORBIDDEN_ENV_VARS.get(role, []))
-    count += len(REQUIRED_ENV_VARS.get(role, []))
-    count += len(FORBIDDEN_PATHS.get(role, []))
-    count += len(REQUIRED_PATHS.get(role, []))
-    count += 1  # .env file scan
-    if role == "mcp-server":
-        count += 1  # workspace entry whitelist
-        count += 1  # .git leak check
-    if role == "claude-server":
-        count += 1  # MCP config validation
-        count += 1  # Prompt immutability
-    return count
+# ---------------------------------------------------------------------------
+# TestMcpConfig
+# ---------------------------------------------------------------------------
+
+class TestMcpConfig:
+    def test_missing_file(self, tmp_path):
+        errors = verify_isolation.check_mcp_config(str(tmp_path / "missing.json"))
+        assert any("missing" in e for e in errors)
+
+    def test_invalid_json(self, tmp_path):
+        f = tmp_path / "bad.json"
+        f.write_text("{not json")
+        errors = verify_isolation.check_mcp_config(str(f))
+        assert any("invalid" in e.lower() for e in errors)
+
+    def test_missing_mcp_servers_key(self, tmp_path):
+        f = tmp_path / "cfg.json"
+        f.write_text('{"other": {}}')
+        errors = verify_isolation.check_mcp_config(str(f))
+        assert any("mcpServers" in e for e in errors)
+
+    def test_missing_fileserver_entry(self, tmp_path):
+        f = tmp_path / "cfg.json"
+        f.write_text('{"mcpServers": {"other": {}}}')
+        errors = verify_isolation.check_mcp_config(str(f))
+        assert any("fileserver" in e for e in errors)
+
+    def test_valid_config(self, tmp_path):
+        f = tmp_path / "cfg.json"
+        f.write_text('{"mcpServers": {"fileserver": {"command": "python"}}}')
+        errors = verify_isolation.check_mcp_config(str(f))
+        assert errors == []
 
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    if len(sys.argv) != 2:
-        print(f"Usage: {sys.argv[0]} <role>", file=sys.stderr)
-        print(f"  Roles: {list(FORBIDDEN_ENV_VARS.keys())}", file=sys.stderr)
-        sys.exit(1)
-    verify_all(sys.argv[1])
+# ---------------------------------------------------------------------------
+# TestFullPass
+# ---------------------------------------------------------------------------
+
+def _exists_only_required(role):
+    """Return a side_effect for os.path.exists: True iff path is required for role."""
+    required = set(verify_isolation.REQUIRED_PATHS.get(role, []))
+    return lambda p: p in required
+
+
+class TestFullPass:
+    """Happy-path: verify_all must not raise for clean environments."""
+
+    def test_proxy_clean_passes(self, clean_env_proxy):
+        with patch.dict(os.environ, clean_env_proxy, clear=True), \
+             patch("os.path.exists", side_effect=_exists_only_required("proxy")), \
+             patch("verify_isolation.find_env_files", return_value=[]):
+            try:
+                verify_all("proxy")
+            except SystemExit:
+                pytest.fail("verify_all raised SystemExit for clean proxy env")
+
+    def test_caddy_clean_passes(self, clean_env_caddy):
+        with patch.dict(os.environ, clean_env_caddy, clear=True), \
+             patch("os.path.exists", side_effect=_exists_only_required("caddy")), \
+             patch("verify_isolation.find_env_files", return_value=[]):
+            try:
+                verify_all("caddy")
+            except SystemExit:
+                pytest.fail("verify_all raised SystemExit for clean caddy env")
+
+    def test_mcp_server_clean_passes(self, clean_env_mcp_server):
+        required = set(verify_isolation.REQUIRED_PATHS.get("mcp-server", []))
+        def exists_mcp(p):
+            # Return True for required paths, False for forbidden paths
+            return p in required
+        with patch.dict(os.environ, clean_env_mcp_server, clear=True), \
+             patch("os.path.exists", side_effect=exists_mcp), \
+             patch("os.path.isdir", return_value=True), \
+             patch("os.listdir", return_value=list(verify_isolation.WORKSPACE_ALLOWED_ENTRIES)), \
+             patch("verify_isolation.find_env_files", return_value=[]), \
+             patch("verify_isolation.check_git_no_parent_leak", return_value=[]):
+            try:
+                verify_all("mcp-server")
+            except SystemExit:
+                pytest.fail("verify_all raised SystemExit for clean mcp-server env")
+
+
+# ---------------------------------------------------------------------------
+# TestUnknownRole
+# ---------------------------------------------------------------------------
+
+class TestUnknownRole:
+    def test_unknown_role_exits(self):
+        with pytest.raises(SystemExit):
+            verify_all("unknown-role")
