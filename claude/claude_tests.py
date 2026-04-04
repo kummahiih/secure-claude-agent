@@ -59,7 +59,12 @@ def test_fastapi_endpoint_authorized_success():
         }
     )
 
-    with patch("server.subprocess.run", side_effect=[mock_task, mock_done]) as mock_run:
+    mock_has_task = MagicMock()
+    mock_has_task.status_code = 200
+    mock_has_task.json.return_value = {"task": {"id": "t1", "name": "Do something"}}
+
+    with patch("server.requests.get", return_value=mock_has_task), \
+         patch("server.subprocess.run", side_effect=[mock_task, mock_done]) as mock_run:
         response = client.post("/ask", headers=headers, json={"model": "claude-sonnet-4-6", "query": "What is the status?"})
         assert response.status_code == 200
         json_response = response.json()
@@ -133,7 +138,12 @@ def test_plan_loop_success():
         "Calling plan_complete... done."
     )
 
-    with patch("server.subprocess.run", return_value=mock_result) as mock_run:
+    mock_has_task = MagicMock()
+    mock_has_task.status_code = 200
+    mock_has_task.json.return_value = {"task": {"id": "t1", "name": "Do work"}}
+
+    with patch("server.requests.get", return_value=mock_has_task), \
+         patch("server.subprocess.run", return_value=mock_result) as mock_run:
         response = client.post("/ask", headers=headers, json={"model": "claude-sonnet-4-6", "query": "Run the plan loop"})
         assert response.status_code == 200
         json_response = response.json()
@@ -156,7 +166,12 @@ def test_plan_loop_block_after_retries():
         "Calling plan_block... blocked due to repeated test failures."
     )
 
-    with patch("server.subprocess.run", return_value=mock_result) as mock_run:
+    mock_has_task = MagicMock()
+    mock_has_task.status_code = 200
+    mock_has_task.json.return_value = {"task": {"id": "t2", "name": "Failing task"}}
+
+    with patch("server.requests.get", return_value=mock_has_task), \
+         patch("server.subprocess.run", return_value=mock_result) as mock_run:
         response = client.post("/ask", headers=headers, json={"model": "claude-sonnet-4-6", "query": "Run the plan loop with failures"})
         assert response.status_code == 200
         json_response = response.json()

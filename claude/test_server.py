@@ -11,12 +11,14 @@ sys.modules["runenv"] = MagicMock(
     ANTHROPIC_BASE_URL="https://api.anthropic.com",
     MCP_API_TOKEN="dummy-mcp-token",
     PLAN_API_TOKEN="dummy-plan-token",
+    PLAN_SERVER_URL="https://plan-server:8443",
     TESTER_API_TOKEN="dummy-tester-token",
     GIT_API_TOKEN="dummy-git-token",
     LOG_SERVER_URL="https://log-server:8443",
     LOG_API_TOKEN="dummy-log-token",
     SYSTEM_PROMPT="test system prompt",
     PLAN_SYSTEM_PROMPT="test plan system prompt",
+    ADHOC_SYSTEM_PROMPT="test adhoc system prompt",
 )
 sys.modules["verify_isolation"] = MagicMock()
 
@@ -280,3 +282,86 @@ class TestLogEmission:
         assert len(captured) == 1
         assert "timestamp" in captured[0]
         assert captured[0]["timestamp"].endswith("Z")
+
+
+class TestAdhocMode:
+    """Tests for the plan-check branching in the /ask endpoint."""
+
+    def _make_subprocess_result(self, stdout="ad-hoc answer", returncode=0):
+        r = MagicMock()
+        r.returncode = returncode
+        r.stdout = stdout
+        r.stderr = ""
+        return r
+
+    def _auth_headers(self):
+        # Use the token the server module was initialised with (may be real or mock value)
+        return {"Authorization": f"Bearer {_server_module.CLAUDE_API_TOKEN}"}
+
+    def test_no_plan_skips_loop(self):
+        """404 from plan-server → single subagent invocation with ADHOC_SYSTEM_PROMPT."""
+        from fastapi.testclient import TestClient
+
+        client = TestClient(_server_module.app)
+
+        mock_plan_resp = MagicMock()
+        mock_plan_resp.status_code = 404
+
+        mock_sub = self._make_subprocess_result(stdout="ad-hoc answer")
+
+        with patch("server.requests.get", return_value=mock_plan_resp), \
+             patch("server.subprocess.run", return_value=mock_sub) as mock_run:
+            response = client.post("/ask", headers=self._auth_headers(),
+                                   json={"model": "claude-sonnet-4-6", "query": "hello"})
+
+        assert response.status_code == 200
+        assert response.json()["response"] == "ad-hoc answer"
+        assert mock_run.call_count == 1
+        cmd = mock_run.call_args[0][0]
+        idx = cmd.index("--system-prompt")
+        assert cmd[idx + 1] == _server_module.ADHOC_SYSTEM_PROMPT
+
+    def test_active_plan_uses_loop(self):
+        """200 with task from plan-server → loop with SYSTEM_PROMPT, multiple invocations."""
+        from fastapi.testclient import TestClient
+
+        client = TestClient(_server_module.app)
+
+        mock_plan_resp = MagicMock()
+        mock_plan_resp.status_code = 200
+        mock_plan_resp.json.return_value = {"task": {"id": "t1", "name": "Do work"}}
+
+        mock_task = self._make_subprocess_result(stdout="task done")
+        mock_done = self._make_subprocess_result(stdout="DONE")
+
+        with patch("server.requests.get", return_value=mock_plan_resp), \
+             patch("server.subprocess.run", side_effect=[mock_task, mock_done]) as mock_run:
+            response = client.post("/ask", headers=self._auth_headers(),
+                                   json={"model": "claude-sonnet-4-6", "query": "run plan"})
+
+        assert response.status_code == 200
+        assert "task done" in response.json()["response"]
+        assert mock_run.call_count == 2
+        cmd = mock_run.call_args_list[0][0][0]
+        idx = cmd.index("--system-prompt")
+        assert cmd[idx + 1] == _server_module.SYSTEM_PROMPT
+
+    def test_plan_check_failure_falls_back(self):
+        """Connection error to plan-server → ad-hoc single invocation, no crash."""
+        from fastapi.testclient import TestClient
+
+        client = TestClient(_server_module.app)
+
+        mock_sub = self._make_subprocess_result(stdout="fallback answer")
+
+        with patch("server.requests.get", side_effect=ConnectionError("plan-server down")), \
+             patch("server.subprocess.run", return_value=mock_sub) as mock_run:
+            response = client.post("/ask", headers=self._auth_headers(),
+                                   json={"model": "claude-sonnet-4-6", "query": "hello"})
+
+        assert response.status_code == 200
+        assert response.json()["response"] == "fallback answer"
+        assert mock_run.call_count == 1
+        cmd = mock_run.call_args[0][0]
+        idx = cmd.index("--system-prompt")
+        assert cmd[idx + 1] == _server_module.ADHOC_SYSTEM_PROMPT

@@ -214,7 +214,7 @@ def _has_active_plan_task() -> bool:
             return bool(resp.json().get("task"))
         return True  # Unknown status — default to loop
     except Exception:
-        return True  # Unreachable — default to loop
+        return False  # Unreachable — fall back to ad-hoc single invocation
 
 
 def _run_subagent(query: str, model: str, system_prompt: str) -> tuple[dict, int]:
