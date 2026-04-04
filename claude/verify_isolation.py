@@ -65,6 +65,7 @@ FORBIDDEN_ENV_VARS = {
         "TESTER_API_TOKEN",       # Internal tester auth, not for proxy
         "CLAUDE_API_TOKEN",       # Ingress auth, not for proxy
         "GIT_API_TOKEN",          # Git-server auth, not for proxy
+        "LOG_API_TOKEN",          # Log-server auth, not for proxy (RR-19)
     ],
     "caddy": [
         "ANTHROPIC_API_KEY",      # Real key, not for caddy
@@ -75,6 +76,7 @@ FORBIDDEN_ENV_VARS = {
         "CLAUDE_API_TOKEN",       # Ingress auth handled via Caddyfile, not env
         "AGENT_API_TOKEN",        # Auth is handled by claude-server, not Caddy
         "GIT_API_TOKEN",          # Git-server auth, not for caddy
+        "LOG_API_TOKEN",          # Log-server auth, not for caddy (RR-19)
     ],
     "git-server": [
         "ANTHROPIC_API_KEY",      # Real key, not for git-server
