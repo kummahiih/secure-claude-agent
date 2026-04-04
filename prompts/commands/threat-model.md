@@ -9,7 +9,7 @@ Othervice proceed futher on this document.
 **Objective:** Generate a comprehensive threat model based on the project's architecture, including a prioritized list of security fixes.
 
 **Instructions:**
-1. **Context Gathering:** Read the existing architecture documentation located at `docs/ARCHITECTURE_OVERVIEW.md` and `docs/ARCHITECTURE_DETAIL.md`.
+1. **Context Gathering:** Read both `docs/ARCHITECTURE_OVERVIEW.md` and `docs/ARCHITECTURE_DETAIL.md`. The overview covers components, data flow, and MCP tools; the detail covers network topology, security architecture, and design decisions — both are required for a complete threat model.
 2. **Code Reconnaissance:** Briefly scan the source code in the workspace to understand the implementation details of the architecture you just read about.
 3. **Threat Modeling:** Perform a threat modeling exercise (e.g., using the STRIDE methodology) based on the architecture and your code review.
 4. **Vulnerability Identification:** Identify potential attack vectors, missing trust boundaries, and security weaknesses.
