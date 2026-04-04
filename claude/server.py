@@ -12,7 +12,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 import setuplogging
-from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN, GIT_API_TOKEN, LOG_SERVER_URL, LOG_API_TOKEN, SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT
+from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN, PLAN_API_TOKEN, TESTER_API_TOKEN, GIT_API_TOKEN, LOG_SERVER_URL, LOG_API_TOKEN, PLAN_SERVER_URL, SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, ADHOC_SYSTEM_PROMPT
 from verify_isolation import verify_all
 
 logger = logging.getLogger(__name__)
@@ -193,6 +193,30 @@ _DONE_MARKER = "DONE"
 _MAX_TASK_ITERATIONS = 50
 
 
+def _has_active_plan_task() -> bool:
+    """Return True if plan-server has an active task, False if none.
+
+    Treats unreachable plan server or unknown errors as True (loop behaviour)
+    so that existing logic is preserved when the plan server is unavailable.
+    """
+    if not PLAN_SERVER_URL or not PLAN_API_TOKEN:
+        return True
+    try:
+        resp = requests.get(
+            f"{PLAN_SERVER_URL}/current",
+            headers={"Authorization": f"Bearer {PLAN_API_TOKEN}"},
+            verify=_LOG_CA_BUNDLE,
+            timeout=5,
+        )
+        if resp.status_code == 404:
+            return False
+        if resp.status_code == 200:
+            return bool(resp.json().get("task"))
+        return True  # Unknown status — default to loop
+    except Exception:
+        return True  # Unreachable — default to loop
+
+
 def _run_subagent(query: str, model: str, system_prompt: str) -> tuple[dict, int]:
     """Spawn one claude --print subprocess and return (parsed_output, duration_ms)."""
     t0 = time.monotonic()
@@ -242,6 +266,30 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
     task_responses: list[str] = []
 
     try:
+        if not _has_active_plan_task():
+            # No active plan task — single ad-hoc invocation, no DONE loop
+            logger.info("No active plan task — running ad-hoc single invocation")
+            session_id = secrets.token_hex(8)
+            result, duration_ms = _run_subagent(query, request.model, ADHOC_SYSTEM_PROMPT)
+
+            if result.returncode != 0:
+                logger.error(f"Subagent exited with error: {_redact_secrets(result.stderr)}")
+                _check_upstream_errors(result.stderr)
+                return {"error": result.stderr}
+
+            try:
+                parsed = json.loads(result.stdout)
+                if parsed.get("is_error"):
+                    error_text = parsed.get("result", "Unknown error")
+                    _check_upstream_errors(error_text)
+                    return {"error": error_text}
+                response_text = parsed.get("result", "")
+                _log_llm_call(parsed.get("session_id") or session_id, request.model, parsed, duration_ms)
+            except json.JSONDecodeError:
+                response_text = result.stdout.strip()
+
+            return {"response": response_text}
+
         for iteration in range(_MAX_TASK_ITERATIONS):
             logger.info(f"Spawning subagent iteration {iteration + 1}/{_MAX_TASK_ITERATIONS}")
             session_id = secrets.token_hex(8)

@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 
-from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN, SYSTEM_PROMPT
+from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN, SYSTEM_PROMPT, ADHOC_SYSTEM_PROMPT
 
 
 # Ensure the local directory is in the path
@@ -200,3 +200,54 @@ class TestModelAllowlist:
         response = client.post("/ask", headers=headers, json={"model": "claude-sonnet-4-6-evil", "query": "hello"})
         assert response.status_code == 400
         assert "not allowed" in response.json()["detail"]
+
+
+# --- Ad-hoc vs plan-loop branching tests ---
+
+def test_adhoc_no_plan_single_invocation():
+    """Without an active plan task, /ask runs exactly one subagent with ADHOC_SYSTEM_PROMPT."""
+    headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "Here is my ad-hoc answer."
+
+    mock_no_task = MagicMock()
+    mock_no_task.status_code = 404
+
+    with patch("server.requests.get", return_value=mock_no_task), \
+         patch("server.subprocess.run", return_value=mock_result) as mock_run:
+        response = client.post("/ask", headers=headers, json={"model": "claude-sonnet-4-6", "query": "What time is it?"})
+
+    assert response.status_code == 200
+    assert response.json()["response"] == "Here is my ad-hoc answer."
+    assert mock_run.call_count == 1
+    cmd = mock_run.call_args[0][0]
+    idx = cmd.index("--system-prompt")
+    assert cmd[idx + 1] == ADHOC_SYSTEM_PROMPT
+
+
+def test_adhoc_active_plan_uses_loop():
+    """With an active plan task, /ask uses the normal loop with SYSTEM_PROMPT."""
+    headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
+    mock_task_result = MagicMock()
+    mock_task_result.returncode = 0
+    mock_task_result.stdout = "Task complete."
+
+    mock_done_result = MagicMock()
+    mock_done_result.returncode = 0
+    mock_done_result.stdout = "DONE"
+
+    mock_has_task = MagicMock()
+    mock_has_task.status_code = 200
+    mock_has_task.json.return_value = {"task": {"id": "t1", "name": "Do something"}}
+
+    with patch("server.requests.get", return_value=mock_has_task), \
+         patch("server.subprocess.run", side_effect=[mock_task_result, mock_done_result]) as mock_run:
+        response = client.post("/ask", headers=headers, json={"model": "claude-sonnet-4-6", "query": "Run tasks"})
+
+    assert response.status_code == 200
+    assert response.json()["response"] == "Task complete."
+    assert mock_run.call_count == 2
+    cmd = mock_run.call_args_list[0][0][0]
+    idx = cmd.index("--system-prompt")
+    assert cmd[idx + 1] == SYSTEM_PROMPT
