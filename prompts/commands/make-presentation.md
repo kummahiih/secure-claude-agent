@@ -12,7 +12,8 @@ Read these using the available MCP tools before writing:
 First, check if the threat model and architecture docs already exist:
 - `read_workspace_file` on `docs/THREAT_MODEL.md` — output of `/threat-model`
 - `read_workspace_file` on `docs/TOKEN_MODEL.md` — output of `/token-model`
-- `read_workspace_file` on `docs/ARCHITECTURE.md` — output of `/architecture-doc`
+- `read_workspace_file` on `docs/ARCHITECTURE_OVERVIEW.md` — output of `/architecture-doc`
+- `read_workspace_file` on `docs/ARCHITECTURE_DETAIL.md` — output of `/architecture-doc`
 
 If those exist, use them as primary sources. If not, read the raw documentation:
 - `read_doc` on CONTEXT.md, PLAN.md, WORKSPACE_INTERFACE.md, mcp-tools.json

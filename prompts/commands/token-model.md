@@ -35,7 +35,7 @@ Flag violations as **context debt** with estimated token cost per session. This 
 
 ### Rule 2: Use Architecture Documentation
 
-Read `docs/ARCHITECTURE.md` to understand the system's components, data flows, and trust boundaries. Map each component interaction to a token-consuming operation (LLM call, tool call, file read, test poll).
+Read `docs/ARCHITECTURE_OVERVIEW.md` and `docs/ARCHITECTURE_DETAIL.md` to understand the system's components, data flows, and trust boundaries. Map each component interaction to a token-consuming operation (LLM call, tool call, file read, test poll).
 
 ### Rule 3: Use Server Logs
 
@@ -62,7 +62,7 @@ Every finding must include:
 
 1. **Context Minimization Audit** (Rule 1): Assess project structure against the criteria above. Flag violations.
 
-2. **Architecture Review** (Rule 2): Read `docs/ARCHITECTURE.md`. Map the request lifecycle to token-consuming operations. Identify which components generate LLM round-trips.
+2. **Architecture Review** (Rule 2): Read `docs/ARCHITECTURE_OVERVIEW.md` and `docs/ARCHITECTURE_DETAIL.md`. Map the request lifecycle to token-consuming operations. Identify which components generate LLM round-trips.
 
 3. **Log Analysis** (Rule 3): Query the log service for recent session data. If unavailable, specify what data is needed:
    - LLM call timestamps and token counts per call
