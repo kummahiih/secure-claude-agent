@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import pytest
@@ -428,3 +429,126 @@ class TestIntraLoopPlanCheck:
         assert "task1 done" in body
         assert "task2 done" in body
         assert mock_run.call_count == 3
+
+
+# --- _parse_stream_json ---
+
+class TestParseStreamJson:
+    def test_parses_assistant_turns_and_result(self):
+        """Three assistant messages + a result message → 3 turn usages, correct result text."""
+        lines = [
+            json.dumps({"type": "assistant", "message": {"usage": {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 2, "cache_creation_input_tokens": 1}, "content": [{"type": "text", "text": "hello"}]}}),
+            json.dumps({"type": "assistant", "message": {"usage": {"input_tokens": 20, "output_tokens": 8, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}, "content": []}}),
+            json.dumps({"type": "assistant", "message": {"usage": {"input_tokens": 30, "output_tokens": 12, "cache_read_input_tokens": 3, "cache_creation_input_tokens": 4}, "content": []}}),
+            json.dumps({"type": "result", "result": "final answer", "session_id": "sess-abc", "is_error": False}),
+        ]
+        stdout = "\n".join(lines) + "\n"
+        turn_usages, result_text, session_id, is_error = _server_module._parse_stream_json(stdout)
+
+        assert len(turn_usages) == 3
+        assert turn_usages[0] == {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 2, "cache_creation_input_tokens": 1}
+        assert turn_usages[1]["input_tokens"] == 20
+        assert turn_usages[2]["cache_creation_input_tokens"] == 4
+        assert result_text == "final answer"
+        assert session_id == "sess-abc"
+        assert is_error is False
+
+    def test_malformed_lines_skipped(self):
+        """Invalid JSON lines are skipped; valid ones are parsed correctly."""
+        lines = [
+            "not valid json {{{{",
+            json.dumps({"type": "assistant", "message": {"usage": {"input_tokens": 5, "output_tokens": 3, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}}}),
+            "another bad line",
+            json.dumps({"type": "result", "result": "ok", "session_id": None, "is_error": False}),
+        ]
+        stdout = "\n".join(lines)
+        turn_usages, result_text, session_id, is_error = _server_module._parse_stream_json(stdout)
+
+        assert len(turn_usages) == 1
+        assert result_text == "ok"
+        assert is_error is False
+
+    def test_empty_stdout(self):
+        """Empty stdout → empty turn_usages, empty result_text."""
+        turn_usages, result_text, session_id, is_error = _server_module._parse_stream_json("")
+        assert turn_usages == []
+        assert result_text == ""
+        assert session_id is None
+        assert is_error is False
+
+    def test_no_result_message_falls_back_to_assistant_content(self):
+        """Without a result message, result_text is built from assistant content blocks."""
+        lines = [
+            json.dumps({"type": "assistant", "message": {"usage": {"input_tokens": 1, "output_tokens": 1, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}, "content": [{"type": "text", "text": "part one "}, {"type": "text", "text": "part two"}]}}),
+        ]
+        stdout = "\n".join(lines)
+        turn_usages, result_text, session_id, is_error = _server_module._parse_stream_json(stdout)
+
+        assert len(turn_usages) == 1
+        assert result_text == "part one part two"
+
+    def test_is_error_flag_propagated(self):
+        """is_error from the result message is returned correctly."""
+        line = json.dumps({"type": "result", "result": "boom", "session_id": "s1", "is_error": True})
+        turn_usages, result_text, session_id, is_error = _server_module._parse_stream_json(line)
+        assert is_error is True
+        assert result_text == "boom"
+
+    def test_plain_text_fallback(self):
+        """Non-JSONL stdout is returned as-is via the raw fallback."""
+        turn_usages, result_text, session_id, is_error = _server_module._parse_stream_json("some plain text output")
+        assert result_text == "some plain text output"
+        assert turn_usages == []
+        assert is_error is False
+
+
+# --- _log_llm_turns ---
+
+
+class TestLogLlmTurns:
+    def test_emits_per_turn_events(self, monkeypatch):
+        """_log_llm_turns emits one event per turn with correct turn_number."""
+        captured = []
+        monkeypatch.setattr(_server_module, "_emit_log_event", captured.append)
+
+        turn_usages = [
+            {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+            {"input_tokens": 20, "output_tokens": 8, "cache_read_input_tokens": 1, "cache_creation_input_tokens": 0},
+            {"input_tokens": 30, "output_tokens": 12, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 2},
+        ]
+        _server_module._log_llm_turns("sess-t1", "claude-opus-4", turn_usages, 9000)
+
+        import time; time.sleep(0.05)
+        assert len(captured) == 3
+        assert captured[0]["turn_number"] == 1
+        assert captured[1]["turn_number"] == 2
+        assert captured[2]["turn_number"] == 3
+        assert captured[0]["event_type"] == "llm_call"
+        assert captured[0]["model"] == "claude-opus-4"
+        assert captured[0]["session_id"] == "sess-t1"
+        # duration_ms only on last turn
+        assert captured[0]["duration_ms"] == 0
+        assert captured[1]["duration_ms"] == 0
+        assert captured[2]["duration_ms"] == 9000
+
+    def test_includes_cache_creation_tokens(self, monkeypatch):
+        """_log_llm_turns includes cache_creation_tokens in emitted events."""
+        captured = []
+        monkeypatch.setattr(_server_module, "_emit_log_event", captured.append)
+
+        turn_usages = [
+            {"input_tokens": 5, "output_tokens": 3, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 42},
+        ]
+        _server_module._log_llm_turns("sess-cc", "claude-sonnet-4-6", turn_usages, 100)
+
+        import time; time.sleep(0.05)
+        assert len(captured) == 1
+        assert captured[0]["cache_creation_tokens"] == 42
+
+    def test_empty_turn_usages_emits_nothing(self, monkeypatch):
+        """No events emitted when turn_usages is empty."""
+        captured = []
+        monkeypatch.setattr(_server_module, "_emit_log_event", captured.append)
+        _server_module._log_llm_turns("sess-empty", "claude-sonnet-4-6", [], 100)
+        import time; time.sleep(0.05)
+        assert captured == []
