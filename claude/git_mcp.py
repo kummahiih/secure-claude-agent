@@ -45,9 +45,7 @@ def git_status(submodule_path: str | None = None) -> types.CallToolResult:
     """Run git status.
 
     Args:
-        submodule_path: Optional submodule path relative to workspace root
-                        (e.g. 'cluster/agent').  If omitted, operates on
-                        the root repository.
+        submodule_path: Submodule path (e.g. 'cluster/agent'). Omit for root repo.
     """
     try:
         params: dict = {}
@@ -82,8 +80,7 @@ def git_diff(staged: bool = False, submodule_path: str | None = None) -> types.C
 
     Args:
         staged: If True, show staged (cached) changes.
-        submodule_path: Optional submodule path relative to workspace root.
-                        If omitted, operates on the root repository.
+        submodule_path: Submodule path (e.g. 'cluster/agent'). Omit for root repo.
     """
     try:
         params: dict = {"staged": str(staged).lower()}
@@ -149,8 +146,7 @@ def git_commit(message: str, submodule_path: str | None = None) -> types.CallToo
 
     Args:
         message: Commit message (required, non-empty).
-        submodule_path: Optional submodule path relative to workspace root.
-                        If omitted, commits to the root repository.
+        submodule_path: Submodule path (e.g. 'cluster/agent'). Omit for root repo.
     """
     if not message or not message.strip():
         return _err("Commit message must not be empty")
@@ -187,8 +183,7 @@ def git_log(max_count: int = 10, submodule_path: str | None = None) -> types.Cal
 
     Args:
         max_count: Number of commits to show (default 10, max 50).
-        submodule_path: Optional submodule path relative to workspace root.
-                        If omitted, shows log for the root repository.
+        submodule_path: Submodule path (e.g. 'cluster/agent'). Omit for root repo.
     """
     max_count = min(max(1, max_count), 50)
     try:
@@ -226,8 +221,7 @@ def git_reset_soft(count: int = 1, submodule_path: str | None = None) -> types.C
 
     Args:
         count: Number of commits to undo (default 1, max 5).
-        submodule_path: Optional submodule path relative to workspace root.
-                        If omitted, resets the root repository.
+        submodule_path: Submodule path (e.g. 'cluster/agent'). Omit for root repo.
     """
     count = min(max(1, count), 5)
     try:
@@ -271,10 +265,7 @@ TOOLS = [
             "properties": {
                 "submodule_path": {
                     "type": "string",
-                    "description": (
-                        "Optional submodule path relative to workspace root "
-                        "(e.g. 'cluster/agent'). If omitted, operates on the root repository."
-                    ),
+                    "description": "Submodule path (e.g. 'cluster/agent'). Omit for root repo.",
                 },
             },
         },
@@ -292,10 +283,7 @@ TOOLS = [
                 },
                 "submodule_path": {
                     "type": "string",
-                    "description": (
-                        "Optional submodule path relative to workspace root "
-                        "(e.g. 'cluster/agent'). If omitted, operates on the root repository."
-                    ),
+                    "description": "Submodule path (e.g. 'cluster/agent'). Omit for root repo.",
                 },
             },
         },
@@ -327,10 +315,7 @@ TOOLS = [
                 },
                 "submodule_path": {
                     "type": "string",
-                    "description": (
-                        "Optional submodule path relative to workspace root "
-                        "(e.g. 'cluster/agent'). If omitted, commits to the root repository."
-                    ),
+                    "description": "Submodule path (e.g. 'cluster/agent'). Omit for root repo.",
                 },
             },
             "required": ["message"],
@@ -349,10 +334,7 @@ TOOLS = [
                 },
                 "submodule_path": {
                     "type": "string",
-                    "description": (
-                        "Optional submodule path relative to workspace root "
-                        "(e.g. 'cluster/agent'). If omitted, shows log for the root repository."
-                    ),
+                    "description": "Submodule path (e.g. 'cluster/agent'). Omit for root repo.",
                 },
             },
         },
@@ -374,10 +356,7 @@ TOOLS = [
                 },
                 "submodule_path": {
                     "type": "string",
-                    "description": (
-                        "Optional submodule path relative to workspace root "
-                        "(e.g. 'cluster/agent'). If omitted, resets the root repository."
-                    ),
+                    "description": "Submodule path (e.g. 'cluster/agent'). Omit for root repo.",
                 },
             },
         },
