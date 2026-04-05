@@ -13,6 +13,7 @@ see [docs/CONTEXT.md](../../../docs/CONTEXT.md) in the parent repo.
 subprocess.run(
     ["claude", "--print", "--dangerously-skip-permissions",
      "--output-format", "json",
+     "--verbose",
      "--mcp-config", "/home/appuser/sandbox/.mcp.json",
      "--model", request.model,
      "--system-prompt", SYSTEM_PROMPT,

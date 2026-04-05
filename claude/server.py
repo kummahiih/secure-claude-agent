@@ -304,6 +304,7 @@ def _run_subagent(query: str, model: str, system_prompt: str) -> tuple[dict, int
         [
             "claude", "--print", "--dangerously-skip-permissions",
             "--output-format", "stream-json",
+            "--verbose",
             "--mcp-config", "/home/appuser/sandbox/.mcp.json",
             "--model", model,
             "--system-prompt", system_prompt,
@@ -420,6 +421,7 @@ async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
             [
                 "claude", "--print", "--dangerously-skip-permissions",
                 "--output-format", "stream-json",
+                "--verbose",
                 "--mcp-config", "/home/appuser/sandbox/.mcp.json",
                 "--model", request.model,
                 "--system-prompt", PLAN_SYSTEM_PROMPT,

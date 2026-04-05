@@ -47,6 +47,7 @@ def test_fastapi_endpoint_authorized_success():
         [
             "claude", "--print", "--dangerously-skip-permissions",
             "--output-format", "stream-json",
+            "--verbose",
             "--mcp-config", "/home/appuser/sandbox/.mcp.json",
             "--model", "claude-sonnet-4-6",
             "--system-prompt", SYSTEM_PROMPT,
