@@ -253,6 +253,32 @@ async def test_3_strike_rule_resets_on_pass(mock_post, mock_get):
     await _dispatch("run_tests", {})
 
 
+# --- get_test_results: wait=true and timeout=330 ---
+
+@pytest.mark.asyncio
+@patch("tester_mcp.requests.get")
+async def test_get_results_uses_wait_param(mock_get):
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {
+        "status": "pass", "exit_code": 0, "timestamp": "", "output": ""
+    }
+    await _dispatch("get_test_results", {})
+    args, kwargs = mock_get.call_args
+    assert "wait=true" in args[0]
+
+
+@pytest.mark.asyncio
+@patch("tester_mcp.requests.get")
+async def test_get_results_uses_long_timeout(mock_get):
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {
+        "status": "pass", "exit_code": 0, "timestamp": "", "output": ""
+    }
+    await _dispatch("get_test_results", {})
+    _, kwargs = mock_get.call_args
+    assert kwargs["timeout"] == 330
+
+
 # --- _dispatch: unknown tool ---
 
 @pytest.mark.asyncio
