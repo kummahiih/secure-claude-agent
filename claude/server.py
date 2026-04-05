@@ -83,6 +83,63 @@ def _log_llm_call(session_id: str, model: str, parsed: dict, duration_ms: int) -
     threading.Thread(target=_emit_log_event, args=(event,), daemon=True).start()
 
 
+def _parse_stream_json(stdout: str) -> tuple[list[dict], str, str | None, bool]:
+    """Parse newline-delimited JSON from ``claude --output-format stream-json``.
+
+    Returns (turn_usages, result_text, session_id, is_error) where:
+    - turn_usages: list of per-turn usage dicts with keys
+      input_tokens, output_tokens, cache_read_input_tokens,
+      cache_creation_input_tokens
+    - result_text: text from the ``result`` type message (or concatenated
+      assistant content as fallback)
+    - session_id: from the result message, or None
+    - is_error: True when the result message's ``is_error`` flag is set
+    """
+    turn_usages: list[dict] = []
+    result_text: str = ""
+    session_id: str | None = None
+    is_error: bool = False
+    assistant_texts: list[str] = []
+    found_result = False
+
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        msg_type = obj.get("type")
+
+        if msg_type == "assistant":
+            # Collect usage if present
+            usage = obj.get("message", {}).get("usage")
+            if usage:
+                turn_usages.append({
+                    "input_tokens": usage.get("input_tokens", 0),
+                    "output_tokens": usage.get("output_tokens", 0),
+                    "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0),
+                    "cache_creation_input_tokens": usage.get("cache_creation_input_tokens", 0),
+                })
+            # Collect assistant text content for fallback
+            for block in obj.get("message", {}).get("content", []):
+                if isinstance(block, dict) and block.get("type") == "text":
+                    assistant_texts.append(block.get("text", ""))
+
+        elif msg_type == "result":
+            found_result = True
+            result_text = obj.get("result", "")
+            session_id = obj.get("session_id")
+            is_error = bool(obj.get("is_error", False))
+
+    if not found_result and assistant_texts:
+        result_text = "".join(assistant_texts)
+
+    return turn_usages, result_text, session_id, is_error
+
+
 PATH_BLACKLIST = [
     "\0",
     "..",
