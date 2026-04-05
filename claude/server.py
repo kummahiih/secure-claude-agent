@@ -319,6 +319,11 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
                 logger.info("Subagent returned DONE — no more tasks.")
                 break
 
+            # Pre-spawn check: stop if plan-server has no remaining tasks
+            if not _has_active_plan_task():
+                logger.info("No remaining plan tasks — stopping loop")
+                break
+
         combined = "\n\n---\n\n".join(r for r in task_responses if r.strip() != _DONE_MARKER)
         return {"response": combined or _DONE_MARKER}
 
