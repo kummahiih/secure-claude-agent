@@ -365,3 +365,66 @@ class TestAdhocMode:
         cmd = mock_run.call_args[0][0]
         idx = cmd.index("--system-prompt")
         assert cmd[idx + 1] == _server_module.ADHOC_SYSTEM_PROMPT
+
+
+class TestIntraLoopPlanCheck:
+    """Tests for the intra-loop plan check added after each subagent iteration."""
+
+    def _make_subprocess_result(self, stdout="task done", returncode=0):
+        r = MagicMock()
+        r.returncode = returncode
+        r.stdout = stdout
+        r.stderr = ""
+        return r
+
+    def _auth_headers(self):
+        return {"Authorization": f"Bearer {_server_module.CLAUDE_API_TOKEN}"}
+
+    def test_loop_stops_when_plan_empty_after_task(self):
+        """After one task completes, 404 from plan-server breaks loop without spawning DONE subagent."""
+        from fastapi.testclient import TestClient
+
+        client = TestClient(_server_module.app)
+
+        plan_with_task = MagicMock()
+        plan_with_task.status_code = 200
+        plan_with_task.json.return_value = {"task": {"id": "t1", "name": "Do work"}}
+
+        plan_empty = MagicMock()
+        plan_empty.status_code = 404
+
+        mock_task = self._make_subprocess_result(stdout="task done")
+
+        with patch("server.requests.get", side_effect=[plan_with_task, plan_empty]), \
+             patch("server.subprocess.run", return_value=mock_task) as mock_run:
+            response = client.post("/ask", headers=self._auth_headers(),
+                                   json={"model": "claude-sonnet-4-6", "query": "run plan"})
+
+        assert response.status_code == 200
+        assert "task done" in response.json()["response"]
+        assert mock_run.call_count == 1
+
+    def test_loop_continues_when_plan_has_next_task(self):
+        """When plan-server always has tasks, loop continues until subagent returns DONE."""
+        from fastapi.testclient import TestClient
+
+        client = TestClient(_server_module.app)
+
+        mock_plan_resp = MagicMock()
+        mock_plan_resp.status_code = 200
+        mock_plan_resp.json.return_value = {"task": {"id": "t1", "name": "Do work"}}
+
+        mock_t1 = self._make_subprocess_result(stdout="task1 done")
+        mock_t2 = self._make_subprocess_result(stdout="task2 done")
+        mock_done = self._make_subprocess_result(stdout="DONE")
+
+        with patch("server.requests.get", return_value=mock_plan_resp), \
+             patch("server.subprocess.run", side_effect=[mock_t1, mock_t2, mock_done]) as mock_run:
+            response = client.post("/ask", headers=self._auth_headers(),
+                                   json={"model": "claude-sonnet-4-6", "query": "run plan"})
+
+        assert response.status_code == 200
+        body = response.json()["response"]
+        assert "task1 done" in body
+        assert "task2 done" in body
+        assert mock_run.call_count == 3
