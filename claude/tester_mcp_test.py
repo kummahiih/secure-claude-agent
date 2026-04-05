@@ -296,3 +296,94 @@ async def test_call_tool_unknown():
     result = await call_tool("nonexistent_tool", {})
     assert result.isError is True
     assert "Unknown tool" in result.content[0].text
+
+# --- test_run log event emission ---
+
+@pytest.mark.asyncio
+@patch("tester_mcp.threading.Thread")
+@patch("tester_mcp.requests.get")
+async def test_get_results_emits_log_event_on_pass(mock_get, mock_thread):
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {
+        "status": "pass", "exit_code": 0, "timestamp": "", "output": "ok"
+    }
+    mock_thread_instance = MagicMock()
+    mock_thread.return_value = mock_thread_instance
+
+    await _dispatch("get_test_results", {})
+
+    mock_thread.assert_called_once()
+    _, kwargs = mock_thread.call_args
+    event = kwargs["args"][0]
+    assert event["event_type"] == "test_run"
+    assert event["exit_code"] == 0
+    assert event["output_size_bytes"] == len("ok")
+    assert kwargs["daemon"] is True
+    mock_thread_instance.start.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("tester_mcp.threading.Thread")
+@patch("tester_mcp.requests.get")
+async def test_get_results_emits_log_event_on_fail(mock_get, mock_thread):
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {
+        "status": "fail", "exit_code": 1, "timestamp": "", "output": "FAILED test_foo"
+    }
+    mock_thread_instance = MagicMock()
+    mock_thread.return_value = mock_thread_instance
+
+    await _dispatch("get_test_results", {})
+
+    mock_thread.assert_called_once()
+    _, kwargs = mock_thread.call_args
+    event = kwargs["args"][0]
+    assert event["event_type"] == "test_run"
+    assert event["exit_code"] == 1
+    assert event["output_size_bytes"] == len("FAILED test_foo")
+
+
+@pytest.mark.asyncio
+@patch("tester_mcp.threading.Thread")
+@patch("tester_mcp.requests.get")
+async def test_get_results_emits_duration_ms_when_present(mock_get, mock_thread):
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {
+        "status": "pass", "exit_code": 0, "timestamp": "", "output": "", "duration_ms": 1234
+    }
+    mock_thread_instance = MagicMock()
+    mock_thread.return_value = mock_thread_instance
+
+    await _dispatch("get_test_results", {})
+
+    _, kwargs = mock_thread.call_args
+    event = kwargs["args"][0]
+    assert event["duration_ms"] == 1234
+
+
+@pytest.mark.asyncio
+@patch("tester_mcp.threading.Thread")
+@patch("tester_mcp.requests.get")
+async def test_get_results_does_not_emit_on_running(mock_get, mock_thread):
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {
+        "status": "running", "exit_code": 0, "timestamp": "", "output": ""
+    }
+
+    await _dispatch("get_test_results", {})
+
+    mock_thread.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("tester_mcp.threading.Thread")
+@patch("tester_mcp.requests.get")
+async def test_get_results_does_not_emit_on_pending(mock_get, mock_thread):
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {
+        "status": "pending", "exit_code": 0, "timestamp": "", "output": ""
+    }
+
+    await _dispatch("get_test_results", {})
+
+    mock_thread.assert_not_called()

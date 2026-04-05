@@ -1,8 +1,10 @@
 import logging
 import requests
 import json
+import threading
 import setuplogging
 from runenv import TESTER_SERVER_URL, TESTER_API_TOKEN
+from log_emit import _emit_log_event
 from mcp.server import Server
 from mcp import types
 from mcp.types import CallToolResult, TextContent
@@ -104,6 +106,16 @@ async def _dispatch(name: str, arguments: dict) -> str:
             elif status == "pass":
                 _consecutive_failures = 0
                 _failure_counted_for_current_run = False
+
+            if status in ("pass", "fail"):
+                event = {
+                    "event_type": "test_run",
+                    "exit_code": data.get("exit_code", 0),
+                    "output_size_bytes": len(data.get("output", "")),
+                }
+                if "duration_ms" in data:
+                    event["duration_ms"] = data["duration_ms"]
+                threading.Thread(target=_emit_log_event, args=(event,), daemon=True).start()
 
             if status == "pass":
                 data = {"status": "pass", "exit_code": 0}
