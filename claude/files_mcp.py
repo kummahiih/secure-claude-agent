@@ -3,6 +3,8 @@ import requests
 import json
 import setuplogging
 from runenv import MCP_SERVER_URL, MCP_API_TOKEN
+from log_emit import _emit_log_event
+import threading
 from mcp.server import Server
 from mcp import types
 from mcp.types import CallToolResult, TextContent
@@ -153,6 +155,11 @@ async def _dispatch(name: str, arguments: dict) -> str:
             headers=HEADERS, verify=VERIFY, timeout=10
         )
         if response.status_code == 200:
+            threading.Thread(
+                target=_emit_log_event,
+                args=({"event_type": "file_read", "path": arguments["file_path"], "size_bytes": len(response.text)},),
+                daemon=True,
+            ).start()
             return response.text
         elif response.status_code == 401:
             raise PermissionError("Unauthorized. Token mismatch.")

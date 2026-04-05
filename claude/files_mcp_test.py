@@ -438,3 +438,47 @@ async def test_create_directory_special_chars(mock_post):
     args, kwargs = mock_post.call_args
     assert args[0] == "https://mcp-server:8443/mkdir"
     assert kwargs["params"] == {"path": path}
+
+
+# --- file_read log event emission ---
+
+@pytest.mark.asyncio
+@patch("files_mcp.threading.Thread")
+@patch("files_mcp.requests.get")
+async def test_read_file_emits_log_event_on_success(mock_get, mock_thread):
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.text = "hello world"
+    mock_thread_instance = MagicMock()
+    mock_thread.return_value = mock_thread_instance
+
+    result = await _dispatch("read_workspace_file", {"file_path": "foo.py"})
+    assert result == "hello world"
+
+    mock_thread.assert_called_once()
+    _, kwargs = mock_thread.call_args
+    assert kwargs["daemon"] is True
+    event = kwargs["args"][0]
+    assert event["event_type"] == "file_read"
+    assert event["path"] == "foo.py"
+    assert event["size_bytes"] == len("hello world")
+    mock_thread_instance.start.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.threading.Thread")
+@patch("files_mcp.requests.get")
+async def test_read_file_does_not_emit_log_event_on_error(mock_get, mock_thread):
+    mock_get.return_value.status_code = 404
+    with pytest.raises(FileNotFoundError):
+        await _dispatch("read_workspace_file", {"file_path": "missing.txt"})
+    mock_thread.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.threading.Thread")
+@patch("files_mcp.requests.get")
+async def test_read_file_does_not_emit_log_event_on_server_error(mock_get, mock_thread):
+    mock_get.return_value.status_code = 500
+    with pytest.raises(RuntimeError):
+        await _dispatch("read_workspace_file", {"file_path": "test.txt"})
+    mock_thread.assert_not_called()
