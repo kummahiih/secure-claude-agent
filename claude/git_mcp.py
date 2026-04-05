@@ -7,6 +7,7 @@ Runs as a subprocess of Claude Code inside claude-server.
 """
 
 import asyncio
+import time
 from typing import Any
 
 import requests
@@ -15,6 +16,7 @@ import mcp.types as types
 from mcp.server.lowlevel import Server
 
 from runenv import GIT_SERVER_URL, GIT_API_TOKEN
+from log_emit import _emit_log_event
 
 HEADERS = {"Authorization": f"Bearer {GIT_API_TOKEN}"}
 VERIFY = "/app/certs/ca.crt"
@@ -51,6 +53,7 @@ def git_status(submodule_path: str | None = None) -> types.CallToolResult:
         params: dict = {}
         if submodule_path:
             params["submodule_path"] = submodule_path
+        t0 = time.time()
         resp = requests.get(
             f"{GIT_SERVER_URL}/status",
             params=params,
@@ -59,6 +62,10 @@ def git_status(submodule_path: str | None = None) -> types.CallToolResult:
             timeout=30,
         )
         if resp.status_code == 200:
+            event: dict = {"event_type": "git_op", "operation": "git_status", "duration_ms": int((time.time() - t0) * 1000)}
+            if submodule_path:
+                event["submodule_path"] = submodule_path
+            _emit_log_event(event)
             return _ok(resp.json()["output"])
         elif resp.status_code == 401:
             return _err("Unauthorized: invalid or missing GIT_API_TOKEN")
@@ -82,6 +89,7 @@ def git_diff(staged: bool = False, submodule_path: str | None = None) -> types.C
         params: dict = {"staged": str(staged).lower()}
         if submodule_path:
             params["submodule_path"] = submodule_path
+        t0 = time.time()
         resp = requests.get(
             f"{GIT_SERVER_URL}/diff",
             params=params,
@@ -90,6 +98,10 @@ def git_diff(staged: bool = False, submodule_path: str | None = None) -> types.C
             timeout=30,
         )
         if resp.status_code == 200:
+            event: dict = {"event_type": "git_op", "operation": "git_diff", "duration_ms": int((time.time() - t0) * 1000)}
+            if submodule_path:
+                event["submodule_path"] = submodule_path
+            _emit_log_event(event)
             return _ok(resp.json()["output"])
         elif resp.status_code == 401:
             return _err("Unauthorized: invalid or missing GIT_API_TOKEN")
@@ -111,6 +123,7 @@ def git_add(paths: list[str]) -> types.CallToolResult:
     if not paths:
         return _err("No paths provided to git add")
     try:
+        t0 = time.time()
         resp = requests.post(
             f"{GIT_SERVER_URL}/add",
             json={"paths": paths},
@@ -119,6 +132,7 @@ def git_add(paths: list[str]) -> types.CallToolResult:
             timeout=30,
         )
         if resp.status_code == 200:
+            _emit_log_event({"event_type": "git_op", "operation": "git_add", "duration_ms": int((time.time() - t0) * 1000)})
             return _ok(resp.json()["output"])
         elif resp.status_code == 401:
             return _err("Unauthorized: invalid or missing GIT_API_TOKEN")
@@ -144,6 +158,7 @@ def git_commit(message: str, submodule_path: str | None = None) -> types.CallToo
         body: dict = {"message": message.strip()}
         if submodule_path:
             body["submodule_path"] = submodule_path
+        t0 = time.time()
         resp = requests.post(
             f"{GIT_SERVER_URL}/commit",
             json=body,
@@ -152,6 +167,10 @@ def git_commit(message: str, submodule_path: str | None = None) -> types.CallToo
             timeout=30,
         )
         if resp.status_code == 200:
+            event: dict = {"event_type": "git_op", "operation": "git_commit", "duration_ms": int((time.time() - t0) * 1000)}
+            if submodule_path:
+                event["submodule_path"] = submodule_path
+            _emit_log_event(event)
             return _ok(resp.json()["output"])
         elif resp.status_code == 401:
             return _err("Unauthorized: invalid or missing GIT_API_TOKEN")
@@ -176,6 +195,7 @@ def git_log(max_count: int = 10, submodule_path: str | None = None) -> types.Cal
         params: dict = {"max_count": str(max_count)}
         if submodule_path:
             params["submodule_path"] = submodule_path
+        t0 = time.time()
         resp = requests.get(
             f"{GIT_SERVER_URL}/log",
             params=params,
@@ -184,6 +204,10 @@ def git_log(max_count: int = 10, submodule_path: str | None = None) -> types.Cal
             timeout=30,
         )
         if resp.status_code == 200:
+            event: dict = {"event_type": "git_op", "operation": "git_log", "duration_ms": int((time.time() - t0) * 1000)}
+            if submodule_path:
+                event["submodule_path"] = submodule_path
+            _emit_log_event(event)
             return _ok(resp.json()["output"])
         elif resp.status_code == 401:
             return _err("Unauthorized: invalid or missing GIT_API_TOKEN")
@@ -210,6 +234,7 @@ def git_reset_soft(count: int = 1, submodule_path: str | None = None) -> types.C
         body: dict = {"count": count}
         if submodule_path:
             body["submodule_path"] = submodule_path
+        t0 = time.time()
         resp = requests.post(
             f"{GIT_SERVER_URL}/reset",
             json=body,
@@ -218,6 +243,10 @@ def git_reset_soft(count: int = 1, submodule_path: str | None = None) -> types.C
             timeout=30,
         )
         if resp.status_code == 200:
+            event: dict = {"event_type": "git_op", "operation": "git_reset_soft", "duration_ms": int((time.time() - t0) * 1000)}
+            if submodule_path:
+                event["submodule_path"] = submodule_path
+            _emit_log_event(event)
             return _ok(resp.json()["output"])
         elif resp.status_code == 401:
             return _err("Unauthorized: invalid or missing GIT_API_TOKEN")

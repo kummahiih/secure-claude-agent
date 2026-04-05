@@ -11,10 +11,18 @@ from unittest.mock import patch, MagicMock
 # Set required env vars before importing git_mcp / runenv
 os.environ.setdefault("GIT_API_TOKEN", "dummy-git-token")
 os.environ.setdefault("GIT_SERVER_URL", "https://git-server:8443")
+# Disable log emission in all tests (avoids daemon-thread races with request mocks)
+os.environ["LOG_SERVER_URL"] = ""
 
 import git_mcp
 
 _BASE = "https://git-server:8443"
+
+
+@pytest.fixture(autouse=True)
+def _silence_log_emit(monkeypatch):
+    """Suppress _emit_log_event in all tests; TestGitOpLogEvents overrides with @patch."""
+    monkeypatch.setattr(git_mcp, "_emit_log_event", lambda event: None)
 
 
 # ---------------------------------------------------------------------------
@@ -465,3 +473,84 @@ class TestRestClientStructure:
         """All 6 tool names must remain identical to the old interface."""
         names = {t.name for t in git_mcp.TOOLS}
         assert names == {"git_status", "git_diff", "git_add", "git_commit", "git_log", "git_reset_soft"}
+
+
+# ---------------------------------------------------------------------------
+# git_op log event emission
+# ---------------------------------------------------------------------------
+
+class TestGitOpLogEvents:
+    @patch("git_mcp._emit_log_event")
+    def test_git_status_emits_log_event(self, mock_emit):
+        with patch("requests.get", return_value=_ok_resp("M foo.py")):
+            result = git_mcp.git_status()
+        assert result.isError is False
+        mock_emit.assert_called_once()
+        event = mock_emit.call_args[0][0]
+        assert event["event_type"] == "git_op"
+        assert event["operation"] == "git_status"
+        assert "duration_ms" in event
+
+    @patch("git_mcp._emit_log_event")
+    def test_git_status_includes_submodule_path(self, mock_emit):
+        with patch("requests.get", return_value=_ok_resp("")):
+            git_mcp.git_status(submodule_path="cluster/agent")
+        assert mock_emit.call_args[0][0]["submodule_path"] == "cluster/agent"
+
+    @patch("git_mcp._emit_log_event")
+    def test_git_status_no_submodule_in_event_when_absent(self, mock_emit):
+        with patch("requests.get", return_value=_ok_resp("")):
+            git_mcp.git_status()
+        assert "submodule_path" not in mock_emit.call_args[0][0]
+
+    @patch("git_mcp._emit_log_event")
+    def test_git_status_does_not_emit_on_error(self, mock_emit):
+        with patch("requests.get", return_value=_err_resp(500, "err")):
+            git_mcp.git_status()
+        mock_emit.assert_not_called()
+
+    @patch("git_mcp._emit_log_event")
+    def test_git_commit_emits_log_event(self, mock_emit):
+        with patch("requests.post", return_value=_ok_resp("[main abc] msg")):
+            result = git_mcp.git_commit(message="msg")
+        assert result.isError is False
+        mock_emit.assert_called_once()
+        event = mock_emit.call_args[0][0]
+        assert event["event_type"] == "git_op"
+        assert event["operation"] == "git_commit"
+        assert "duration_ms" in event
+
+    @patch("git_mcp._emit_log_event")
+    def test_git_commit_includes_submodule_path(self, mock_emit):
+        with patch("requests.post", return_value=_ok_resp("[main abc] msg")):
+            git_mcp.git_commit(message="msg", submodule_path="cluster/agent")
+        assert mock_emit.call_args[0][0]["submodule_path"] == "cluster/agent"
+
+    @patch("git_mcp._emit_log_event")
+    def test_git_commit_does_not_emit_on_error(self, mock_emit):
+        with patch("requests.post", return_value=_err_resp(401, "Unauthorized")):
+            git_mcp.git_commit(message="msg")
+        mock_emit.assert_not_called()
+
+    @patch("git_mcp._emit_log_event")
+    def test_git_add_emits_log_event(self, mock_emit):
+        with patch("requests.post", return_value=_ok_resp("Staged: x.py")):
+            git_mcp.git_add(paths=["x.py"])
+        mock_emit.assert_called_once()
+        event = mock_emit.call_args[0][0]
+        assert event["event_type"] == "git_op"
+        assert event["operation"] == "git_add"
+
+    @patch("git_mcp._emit_log_event")
+    def test_git_log_emits_log_event(self, mock_emit):
+        with patch("requests.get", return_value=_ok_resp("abc commit")):
+            git_mcp.git_log()
+        mock_emit.assert_called_once()
+        assert mock_emit.call_args[0][0]["operation"] == "git_log"
+
+    @patch("git_mcp._emit_log_event")
+    def test_git_reset_soft_emits_log_event(self, mock_emit):
+        with patch("requests.post", return_value=_ok_resp("Reset 1 commit(s).")):
+            git_mcp.git_reset_soft(count=1)
+        mock_emit.assert_called_once()
+        assert mock_emit.call_args[0][0]["operation"] == "git_reset_soft"
