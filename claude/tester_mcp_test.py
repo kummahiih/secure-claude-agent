@@ -84,9 +84,9 @@ async def test_get_results_pass(mock_get):
     }
     result = await _dispatch("get_test_results", {})
     data = json.loads(result)
-    assert data["status"] == "pass"
-    assert data["exit_code"] == 0
+    assert data == {"status": "pass", "exit_code": 0}
     assert "output" not in data
+    assert "timestamp" not in data
 
 
 @pytest.mark.asyncio
@@ -103,6 +103,39 @@ async def test_get_results_fail(mock_get):
     data = json.loads(result)
     assert data["status"] == "fail"
     assert data["exit_code"] == 1
+    assert "output" in data
+
+
+@pytest.mark.asyncio
+@patch("tester_mcp.requests.get")
+async def test_get_results_fail_truncates_long_output(mock_get):
+    long_output = "\n".join(f"line {i}" for i in range(100))
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {
+        "status": "fail",
+        "exit_code": 1,
+        "timestamp": "2026-03-19T20:00:00Z",
+        "output": long_output
+    }
+    result = await _dispatch("get_test_results", {})
+    data = json.loads(result)
+    assert len(data["output"].splitlines()) == 50
+
+
+@pytest.mark.asyncio
+@patch("tester_mcp.requests.get")
+async def test_get_results_fail_short_output_unchanged(mock_get):
+    short_output = "\n".join(f"line {i}" for i in range(10))
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.json.return_value = {
+        "status": "fail",
+        "exit_code": 1,
+        "timestamp": "2026-03-19T20:00:00Z",
+        "output": short_output
+    }
+    result = await _dispatch("get_test_results", {})
+    data = json.loads(result)
+    assert len(data["output"].splitlines()) == 10
 
 
 @pytest.mark.asyncio
