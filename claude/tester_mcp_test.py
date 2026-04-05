@@ -212,10 +212,6 @@ async def test_3_strike_rule_blocks_run(mock_post, mock_get):
     # Strike 2
     await _dispatch("run_tests", {})
     await _dispatch("get_test_results", {})
-    
-    # Polling multiple times during strike 2 shouldn't double count
-    await _dispatch("get_test_results", {})
-    await _dispatch("get_test_results", {})
 
     # Strike 3
     await _dispatch("run_tests", {})

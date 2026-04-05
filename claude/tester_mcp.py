@@ -20,13 +20,11 @@ VERIFY = "/app/certs/ca.crt"
 
 # --- 3-Strike Rule State ---
 _consecutive_failures = 0
-_failure_counted_for_current_run = False
 
 def _reset_strike_counter():
     """For testing purposes: resets the strike counter state."""
-    global _consecutive_failures, _failure_counted_for_current_run
+    global _consecutive_failures
     _consecutive_failures = 0
-    _failure_counted_for_current_run = False
 
 
 @server.list_tools()
@@ -34,7 +32,7 @@ async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="run_tests",
-            description="Starts an async test run against the current workspace. Returns immediately with status 'started'. Poll get_test_results to check outcome.",
+            description="Starts an async test run against the current workspace. Returns immediately with status 'started'. Call get_test_results to get the outcome.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -42,7 +40,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get_test_results",
-            description="Returns the result of the most recent test run. On pass: {\"status\":\"pass\",\"exit_code\":0} only. On fail: last 50 lines of output. Fields: status (pass/fail/running/pending), exit_code, timestamp, output.",
+            description="Returns the result of the most recent test run (blocks until complete). On pass: {\"status\":\"pass\",\"exit_code\":0} only. On fail: last 50 lines of output. Fields: status (pass/fail/running/pending), exit_code, timestamp, output.",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -68,7 +66,7 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
 
 
 async def _dispatch(name: str, arguments: dict) -> str:
-    global _consecutive_failures, _failure_counted_for_current_run
+    global _consecutive_failures
 
     if name == "run_tests":
         if _consecutive_failures >= 3:
@@ -81,31 +79,28 @@ async def _dispatch(name: str, arguments: dict) -> str:
             headers=HEADERS, verify=VERIFY, timeout=10
         )
         if response.status_code == 200:
-            _failure_counted_for_current_run = False
             return json.dumps(response.json())
         elif response.status_code == 401:
             raise PermissionError("Unauthorized. Token mismatch.")
         elif response.status_code == 409:
-            raise RuntimeError("A test run is already in progress. Poll get_test_results to wait for completion.")
+            raise RuntimeError("A test run is already in progress. Call get_test_results to wait for completion.")
         else:
             raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
 
     elif name == "get_test_results":
         response = requests.get(
-            f"{TESTER_SERVER_URL}/results",
-            headers=HEADERS, verify=VERIFY, timeout=10
+            f"{TESTER_SERVER_URL}/results?wait=true",
+            headers=HEADERS, verify=VERIFY, timeout=330
         )
         if response.status_code == 200:
             data = response.json()
             status = data.get("status")
 
             # Track failures and reset on pass
-            if status == "fail" and not _failure_counted_for_current_run:
+            if status == "fail":
                 _consecutive_failures += 1
-                _failure_counted_for_current_run = True
             elif status == "pass":
                 _consecutive_failures = 0
-                _failure_counted_for_current_run = False
 
             if status in ("pass", "fail"):
                 event = {
