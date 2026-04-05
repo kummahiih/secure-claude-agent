@@ -105,6 +105,12 @@ async def _dispatch(name: str, arguments: dict) -> str:
                 _consecutive_failures = 0
                 _failure_counted_for_current_run = False
 
+            if status == "pass":
+                data = {"status": "pass", "exit_code": 0}
+            elif status == "fail":
+                output = data.get("output", "")
+                data["output"] = "\n".join(output.splitlines()[-50:])
+
             return json.dumps(data)
         elif response.status_code == 401:
             raise PermissionError("Unauthorized. Token mismatch.")

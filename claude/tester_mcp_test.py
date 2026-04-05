@@ -86,7 +86,7 @@ async def test_get_results_pass(mock_get):
     data = json.loads(result)
     assert data["status"] == "pass"
     assert data["exit_code"] == 0
-    assert "all tests passed" in data["output"]
+    assert "output" not in data
 
 
 @pytest.mark.asyncio
