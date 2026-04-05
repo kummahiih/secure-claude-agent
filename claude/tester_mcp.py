@@ -40,7 +40,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get_test_results",
-            description="Returns the result of the most recent test run as JSON with fields: status (pass/fail/running/pending), exit_code, timestamp, output.",
+            description="Returns the result of the most recent test run. On pass: {\"status\":\"pass\",\"exit_code\":0} only. On fail: last 50 lines of output. Fields: status (pass/fail/running/pending), exit_code, timestamp, output.",
             inputSchema={
                 "type": "object",
                 "properties": {}
