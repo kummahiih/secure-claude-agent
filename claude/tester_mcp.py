@@ -32,7 +32,7 @@ async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="run_tests",
-            description="Starts an async test run against the current workspace. Returns immediately with status 'started'. Call get_test_results to get the outcome.",
+            description="Starts a test run. Call get_test_results for the outcome.",
             inputSchema={
                 "type": "object",
                 "properties": {}
