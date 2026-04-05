@@ -1,8 +1,14 @@
+import json
 import os
 import sys
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
+
+
+def _stream_result(text: str, session_id: str = "test-session", is_error: bool = False) -> str:
+    """Return a single-line stream-json result message."""
+    return json.dumps({"type": "result", "result": text, "session_id": session_id, "is_error": is_error})
 
 from runenv import CLAUDE_API_TOKEN, DYNAMIC_AGENT_KEY, ANTHROPIC_BASE_URL, MCP_API_TOKEN, SYSTEM_PROMPT, ADHOC_SYSTEM_PROMPT
 
@@ -31,11 +37,11 @@ def test_fastapi_endpoint_authorized_success():
     headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
     mock_task = MagicMock()
     mock_task.returncode = 0
-    mock_task.stdout = "Here is the status."
+    mock_task.stdout = _stream_result("Here is the status.")
 
     mock_done = MagicMock()
     mock_done.returncode = 0
-    mock_done.stdout = "DONE"
+    mock_done.stdout = _stream_result("DONE")
 
     expected_call = (
         [
@@ -224,7 +230,7 @@ def test_adhoc_no_plan_single_invocation():
     headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
     mock_result = MagicMock()
     mock_result.returncode = 0
-    mock_result.stdout = "Here is my ad-hoc answer."
+    mock_result.stdout = _stream_result("Here is my ad-hoc answer.")
 
     mock_no_task = MagicMock()
     mock_no_task.status_code = 404
@@ -246,11 +252,11 @@ def test_adhoc_active_plan_uses_loop():
     headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
     mock_task_result = MagicMock()
     mock_task_result.returncode = 0
-    mock_task_result.stdout = "Task complete."
+    mock_task_result.stdout = _stream_result("Task complete.")
 
     mock_done_result = MagicMock()
     mock_done_result.returncode = 0
-    mock_done_result.stdout = "DONE"
+    mock_done_result.stdout = _stream_result("DONE")
 
     mock_has_task = MagicMock()
     mock_has_task.status_code = 200
