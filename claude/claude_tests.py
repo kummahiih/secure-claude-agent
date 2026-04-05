@@ -40,7 +40,7 @@ def test_fastapi_endpoint_authorized_success():
     expected_call = (
         [
             "claude", "--print", "--dangerously-skip-permissions",
-            "--output-format", "json",
+            "--output-format", "stream-json",
             "--mcp-config", "/home/appuser/sandbox/.mcp.json",
             "--model", "claude-sonnet-4-6",
             "--system-prompt", SYSTEM_PROMPT,

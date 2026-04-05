@@ -83,6 +83,26 @@ def _log_llm_call(session_id: str, model: str, parsed: dict, duration_ms: int) -
     threading.Thread(target=_emit_log_event, args=(event,), daemon=True).start()
 
 
+def _log_llm_turns(session_id: str, model: str, turn_usages: list[dict], duration_ms: int) -> None:
+    """Emit one llm_call log event per turn with turn_number (1-indexed)."""
+    n = len(turn_usages)
+    for i, usage in enumerate(turn_usages):
+        event = {
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "session_id": session_id,
+            "event_type": "llm_call",
+            "model": model,
+            "input_tokens": usage.get("input_tokens", 0),
+            "output_tokens": usage.get("output_tokens", 0),
+            "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
+            "cache_creation_tokens": usage.get("cache_creation_input_tokens", 0),
+            "turn_number": i + 1,
+            # Only attach duration_ms to the last turn
+            "duration_ms": duration_ms if i == n - 1 else 0,
+        }
+        threading.Thread(target=_emit_log_event, args=(event,), daemon=True).start()
+
+
 def _parse_stream_json(stdout: str) -> tuple[list[dict], str, str | None, bool]:
     """Parse newline-delimited JSON from ``claude --output-format stream-json``.
 
@@ -136,6 +156,9 @@ def _parse_stream_json(stdout: str) -> tuple[list[dict], str, str | None, bool]:
 
     if not found_result and assistant_texts:
         result_text = "".join(assistant_texts)
+    elif not found_result and not assistant_texts and stdout.strip():
+        # Fallback for non-JSONL output (e.g. plain text in tests or legacy invocations)
+        result_text = stdout.strip()
 
     return turn_usages, result_text, session_id, is_error
 
@@ -280,7 +303,7 @@ def _run_subagent(query: str, model: str, system_prompt: str) -> tuple[dict, int
     result = subprocess.run(
         [
             "claude", "--print", "--dangerously-skip-permissions",
-            "--output-format", "json",
+            "--output-format", "stream-json",
             "--mcp-config", "/home/appuser/sandbox/.mcp.json",
             "--model", model,
             "--system-prompt", system_prompt,
@@ -334,16 +357,11 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
                 _check_upstream_errors(result.stderr)
                 return {"error": result.stderr}
 
-            try:
-                parsed = json.loads(result.stdout)
-                if parsed.get("is_error"):
-                    error_text = parsed.get("result", "Unknown error")
-                    _check_upstream_errors(error_text)
-                    return {"error": error_text}
-                response_text = parsed.get("result", "")
-                _log_llm_call(parsed.get("session_id") or session_id, request.model, parsed, duration_ms)
-            except json.JSONDecodeError:
-                response_text = result.stdout.strip()
+            turn_usages, response_text, parsed_session_id, is_error = _parse_stream_json(result.stdout)
+            if is_error:
+                _check_upstream_errors(response_text)
+                return {"error": response_text}
+            _log_llm_turns(parsed_session_id or session_id, request.model, turn_usages, duration_ms)
 
             return {"response": response_text}
 
@@ -358,16 +376,11 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
                 _check_upstream_errors(result.stderr)
                 return {"error": result.stderr, "responses": task_responses}
 
-            try:
-                parsed = json.loads(result.stdout)
-                if parsed.get("is_error"):
-                    error_text = parsed.get("result", "Unknown error")
-                    _check_upstream_errors(error_text)
-                    return {"error": error_text, "responses": task_responses}
-                response_text = parsed.get("result", "")
-                _log_llm_call(parsed.get("session_id") or session_id, request.model, parsed, duration_ms)
-            except json.JSONDecodeError:
-                response_text = result.stdout.strip()
+            turn_usages, response_text, parsed_session_id, is_error = _parse_stream_json(result.stdout)
+            if is_error:
+                _check_upstream_errors(response_text)
+                return {"error": response_text, "responses": task_responses}
+            _log_llm_turns(parsed_session_id or session_id, request.model, turn_usages, duration_ms)
 
             task_responses.append(response_text)
 
@@ -406,7 +419,7 @@ async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
         result = subprocess.run(
             [
                 "claude", "--print", "--dangerously-skip-permissions",
-                "--output-format", "json",
+                "--output-format", "stream-json",
                 "--mcp-config", "/home/appuser/sandbox/.mcp.json",
                 "--model", request.model,
                 "--system-prompt", PLAN_SYSTEM_PROMPT,
@@ -434,16 +447,12 @@ async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
             _check_upstream_errors(result.stderr)
             return {"error": result.stderr}
 
-        try:
-            parsed = json.loads(result.stdout)
-            if parsed.get("is_error"):
-                error_text = parsed.get("result", "Unknown error")
-                _check_upstream_errors(error_text)
-                return {"error": error_text}
-            _log_llm_call(parsed.get("session_id") or session_id, request.model, parsed, duration_ms)
-            return {"response": parsed.get("result", "")}
-        except json.JSONDecodeError:
-            return {"response": result.stdout.strip()}
+        turn_usages, response_text, parsed_session_id, is_error = _parse_stream_json(result.stdout)
+        if is_error:
+            _check_upstream_errors(response_text)
+            return {"error": response_text}
+        _log_llm_turns(parsed_session_id or session_id, request.model, turn_usages, duration_ms)
+        return {"response": response_text}
 
     except subprocess.TimeoutExpired:
         logger.error("Claude Code timed out.")
