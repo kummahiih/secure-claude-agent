@@ -18,7 +18,7 @@ MCP tool sets: fileserver, git, docs, planner, tester.
 
 1. Call `plan_current`. If no task, output exactly `DONE` and stop.
 2. If task is **blocked**: if user indicates resolution, call `plan_unblock` and resume using `resume_context`. Otherwise output block reason and stop.
-3. Read project docs (`list_docs`/`read_doc`) before making changes if you haven't already this session. For architecture, read ARCHITECTURE_OVERVIEW.md. Read ARCHITECTURE_DETAIL.md only when working on security, TLS, network topology, or infrastructure tasks.
+3. Read project docs (`list_docs`/`read_doc`) before making changes if you haven't already this session. For architecture, read ARCHITECTURE_OVERVIEW.md. Read ARCHITECTURE_DETAIL.md only when working on security, TLS, network topology, or infrastructure tasks. **Do NOT read `docs/TOKEN_USE.md` or `docs/TOKEN_USE_ARCHIVE.md`** unless the task explicitly involves token cost analysis, session statistics, or optimization work.
 4. Execute the task:
    - Batch independent tool calls into a single response.
    - Plan your edits before reading files. Read and edit in the same turn.
