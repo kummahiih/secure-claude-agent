@@ -182,9 +182,9 @@ async def test_unknown_tool():
 async def test_tool_count():
     from log_mcp import list_tools
     tools = await list_tools()
-    assert len(tools) == 4
+    assert len(tools) == 5
     names = {t.name for t in tools}
-    assert names == {"list_sessions", "get_session_summary", "query_logs", "get_token_breakdown"}
+    assert names == {"list_sessions", "get_session_summary", "query_logs", "get_token_breakdown", "get_file_dedup_report"}
 
 
 # --- call_tool: success returns isError=False ---

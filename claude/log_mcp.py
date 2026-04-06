@@ -86,6 +86,17 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["session_id"],
             },
         ),
+        types.Tool(
+            name="get_file_dedup_report",
+            description="Show duplicate file reads for a session, grouped by sha256, with estimated wasted tokens.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Session ID"},
+                },
+                "required": ["session_id"],
+            },
+        ),
     ]
 
 
@@ -172,6 +183,31 @@ async def _dispatch(name: str, arguments: dict) -> str:
             raise FileNotFoundError(f"Session {session_id!r} not found")
         else:
             raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
+
+    elif name == "get_file_dedup_report":
+        session_id = arguments["session_id"]
+        response = requests.get(
+            f"{LOG_SERVER_URL}/sessions/{session_id}/file-dedup",
+            headers=HEADERS, verify=VERIFY, timeout=30,
+        )
+        if response.status_code == 401:
+            raise PermissionError("Unauthorized. Token mismatch.")
+        elif response.status_code == 404:
+            raise FileNotFoundError(f"Session {session_id!r} not found")
+        elif response.status_code != 200:
+            raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
+        data = response.json()
+        if not data:
+            return f"No duplicate file reads detected for session {session_id}."
+        lines = [f"{'path':<60} {'sha256':>12}  {'reads':>5}  {'wasted_tokens':>13}"]
+        lines.append("-" * 97)
+        for row in data:
+            path = row.get("path", "")
+            sha = row.get("sha256", "")[:12]
+            reads = row.get("read_count", 0)
+            wasted = row.get("est_wasted_tokens", 0)
+            lines.append(f"{path:<60} {sha:>12}  {reads:>5}  {wasted:>13}")
+        return "\n".join(lines)
 
     else:
         raise ValueError(f"Unknown tool {name}")
