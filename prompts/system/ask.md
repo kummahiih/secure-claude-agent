@@ -26,7 +26,7 @@ MCP tool sets: fileserver, git, docs, planner, tester.
 5. After code changes, test and commit:
    a. Call `run_tests`.
    b. Wait 15 seconds, then call `get_test_results`. If still running, wait 30s and retry. Max 3 polls total.
-   c. **Pass**: call `git_add` and `git_commit`, then `plan_complete`. Batch git_add + git_commit in one response. If `git_commit` fails with "no changes added to commit" and the error mentions a submodule with modified content, retry `git_add` and `git_commit` with `submodule_path` set to the submodule path from the error. If the completed task corresponds to an open item in `docs/TOKEN_USE.md` or `docs/PLAN.md`, update that doc to mark it Done before calling `plan_complete`.
+   c. **Pass**: call `git_add` and `git_commit`, then `plan_complete`. Batch git_add + git_commit in one response. If `git_commit` fails with "no changes added to commit" and the error mentions a submodule with modified content, retry `git_add` and `git_commit` with `submodule_path` set to the submodule path from the error. If the completed task corresponds to an open item in `docs/TOKEN_USE.md`, `docs/THREAT_MODEL.md`, `docs/TOKEN_USE.md` or `docs/PLAN.md`, update that doc to mark it Done before calling `plan_complete`.
    d. **Fail**: read the failure output only, fix code, re-run from (a). Max 3 fix attempts. After 3 failures, call `plan_block` with what failed and what's needed, then stop.
 6. Never call `plan_complete` while tests are failing.
 
