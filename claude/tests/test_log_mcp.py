@@ -86,8 +86,8 @@ class TestListTools(unittest.TestCase):
     def setUp(self):
         self._tools = _run(log_mcp.list_tools())
 
-    def test_returns_four_tools(self):
-        self.assertEqual(len(self._tools), 4)
+    def test_returns_five_tools(self):
+        self.assertEqual(len(self._tools), 5)
 
     def test_tool_names(self):
         names = {t.name for t in self._tools}
@@ -96,6 +96,7 @@ class TestListTools(unittest.TestCase):
             "get_session_summary",
             "query_logs",
             "get_token_breakdown",
+            "get_file_dedup_report",
         })
 
     def test_all_tools_have_input_schema(self):
@@ -257,3 +258,35 @@ class TestDispatchErrorHandling(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Tests: get_file_dedup_report
+# ---------------------------------------------------------------------------
+
+class TestDispatchGetFileDedupReport(unittest.TestCase):
+
+    def test_non_empty_response_contains_expected_fields(self):
+        dedup_data = [
+            {
+                "path": "/workspace/cluster/agent/claude/log_mcp.py",
+                "sha256": "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+                "read_count": 3,
+                "est_wasted_tokens": 4200,
+            }
+        ]
+        with patch("log_mcp.requests.get") as mock_get:
+            mock_get.return_value = _mock_resp(dedup_data)
+            result = _run(log_mcp._dispatch("get_file_dedup_report", {"session_id": "s1"}))
+            url = mock_get.call_args[0][0]
+            self.assertEqual(url, f"{BASE}/sessions/s1/file-dedup")
+            self.assertIn("/workspace/cluster/agent/claude/log_mcp.py", result)
+            self.assertIn("abcdef123456", result)  # truncated sha256 (first 12 chars)
+            self.assertIn("3", result)              # read_count
+            self.assertIn("4200", result)           # est_wasted_tokens
+
+    def test_empty_response_returns_no_duplicates_message(self):
+        with patch("log_mcp.requests.get") as mock_get:
+            mock_get.return_value = _mock_resp([])
+            result = _run(log_mcp._dispatch("get_file_dedup_report", {"session_id": "s2"}))
+            self.assertIn("No duplicate file reads detected", result)
