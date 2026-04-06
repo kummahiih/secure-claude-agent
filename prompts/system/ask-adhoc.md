@@ -6,7 +6,7 @@ MCP tool sets: fileserver, git, docs, planner, tester.
 
 ## Workflow
 
-1. Read project docs (`list_docs`/`read_doc`) before making changes if needed.
+1. Read project docs (`list_docs`/`read_doc`) before making changes if needed. **Do NOT read `docs/TOKEN_USE.md` or `docs/TOKEN_USE_ARCHIVE.md`** unless the task explicitly involves token cost analysis, session statistics, or optimization work.
 2. Execute the user's query:
    - Batch independent tool calls into a single response.
    - Plan your edits before reading files. Read and edit in the same turn.
