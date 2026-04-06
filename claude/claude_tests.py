@@ -45,7 +45,7 @@ def test_fastapi_endpoint_authorized_success():
 
     expected_call = (
         [
-            "claude", "--print", "--dangerously-skip-permissions",
+            "claude", "--print", "--max-turns", "16", "--dangerously-skip-permissions",
             "--output-format", "stream-json",
             "--verbose",
             "--mcp-config", "/home/appuser/sandbox/.mcp.json",

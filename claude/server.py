@@ -302,7 +302,7 @@ def _run_subagent(query: str, model: str, system_prompt: str) -> tuple[dict, int
     t0 = time.monotonic()
     result = subprocess.run(
         [
-            "claude", "--print", "--dangerously-skip-permissions",
+            "claude", "--print", "--max-turns", "16", "--dangerously-skip-permissions",
             "--output-format", "stream-json",
             "--verbose",
             "--mcp-config", "/home/appuser/sandbox/.mcp.json",
