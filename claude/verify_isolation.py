@@ -96,6 +96,10 @@ FORBIDDEN_ENV_VARS = {
         "GIT_API_TOKEN",          # git-server token must not reach log-server
         "CLAUDE_API_TOKEN",       # Ingress auth, not for log-server
     ],
+    "codex-server": [
+        "ANTHROPIC_API_KEY",      # Real Anthropic key — only proxy should have this
+        "CLAUDE_API_TOKEN",       # Claude ingress auth, not for codex-server
+    ],
 }
 
 # These env vars MUST be present for the container to function correctly.
@@ -115,6 +119,12 @@ REQUIRED_ENV_VARS = {
     ],
     "log-server": [
         "LOG_API_TOKEN",
+    ],
+    "codex-server": [
+        "DYNAMIC_AGENT_KEY",      # OpenAI key routed through proxy
+        "CODEX_API_TOKEN",        # For ingress auth
+        "MCP_API_TOKEN",          # For authenticating to mcp-server
+        "OPENAI_BASE_URL",        # Points to proxy:4000/v1
     ],
     "mcp-server": [
         "MCP_API_TOKEN",
@@ -182,6 +192,13 @@ FORBIDDEN_PATHS = {
         "/app/.secrets.env",
         "/app/.cluster_tokens.env",
     ],
+    "codex-server": [
+        "/app/.secrets.env",
+        "/app/.cluster_tokens.env",
+        "/app/docker-compose.yml",
+        "/app/proxy_config.yaml",
+        "/app/Caddyfile",
+    ],
 }
 
 # Files/dirs that MUST exist — sanity check that mounts and copies are correct.
@@ -215,6 +232,13 @@ REQUIRED_PATHS = {
     "git-server": [
         "/app",
         "/gitdir",
+    ],
+    "codex-server": [
+        "/app/server.py",
+        "/app/certs/agent.crt",
+        "/app/certs/agent.key",
+        "/home/appuser/sandbox/.mcp.json",
+        "/app/prompts",
     ],
 }
 
