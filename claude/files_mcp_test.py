@@ -482,3 +482,44 @@ async def test_read_file_does_not_emit_log_event_on_server_error(mock_get, mock_
     with pytest.raises(RuntimeError):
         await _dispatch("read_workspace_file", {"file_path": "test.txt"})
     mock_thread.assert_not_called()
+
+
+# --- _dispatch: copy_file ---
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_copy_file_success(mock_post):
+    mock_post.return_value.status_code = 200
+    result = await _dispatch("copy_file", {"src": "a.txt", "dst": "b.txt"})
+    assert "a.txt" in result and "b.txt" in result
+    _, kwargs = mock_post.call_args
+    assert kwargs["json"]["src"] == "a.txt"
+    assert kwargs["json"]["dst"] == "b.txt"
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_copy_file_overwrite_success(mock_post):
+    mock_post.return_value.status_code = 200
+    result = await _dispatch("copy_file", {"src": "a.txt", "dst": "b.txt", "overwrite": True})
+    assert "a.txt" in result and "b.txt" in result
+    _, kwargs = mock_post.call_args
+    assert kwargs["json"]["overwrite"] is True
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_copy_file_not_found(mock_post):
+    mock_post.return_value.status_code = 404
+    mock_post.return_value.text = "not found"
+    with pytest.raises(FileNotFoundError):
+        await _dispatch("copy_file", {"src": "missing.txt", "dst": "b.txt"})
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.post")
+async def test_copy_file_conflict(mock_post):
+    mock_post.return_value.status_code = 409
+    mock_post.return_value.text = "conflict"
+    with pytest.raises(FileExistsError):
+        await _dispatch("copy_file", {"src": "a.txt", "dst": "existing.txt"})
