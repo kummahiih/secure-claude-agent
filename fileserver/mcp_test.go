@@ -622,6 +622,111 @@ func TestMCPHandlers(t *testing.T) {
 		}
 	})
 
+	// ── Diff tests ────────────────────────────────────────────────────────────
+
+	t.Run("Diff: identical files returns empty body", func(t *testing.T) {
+		content := "line1\nline2\nline3\n"
+		err := os.WriteFile(filepath.Join(tempDir, "diff_a.txt"), []byte(content), 0644)
+		if err != nil {
+			t.Fatalf("Setup failed: %v", err)
+		}
+		err = os.WriteFile(filepath.Join(tempDir, "diff_b.txt"), []byte(content), 0644)
+		if err != nil {
+			t.Fatalf("Setup failed: %v", err)
+		}
+
+		req := newAuthRequest("GET", "/diff?a=diff_a.txt&b=diff_b.txt", nil)
+		rr := httptest.NewRecorder()
+		handleDiff(rootDir, token)(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("Expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		if rr.Body.Len() != 0 {
+			t.Errorf("Expected empty body for identical files, got: %q", rr.Body.String())
+		}
+	})
+
+	t.Run("Diff: changed lines returns unified diff", func(t *testing.T) {
+		err := os.WriteFile(filepath.Join(tempDir, "diff_c.txt"), []byte("line1\nline2\nline3\n"), 0644)
+		if err != nil {
+			t.Fatalf("Setup failed: %v", err)
+		}
+		err = os.WriteFile(filepath.Join(tempDir, "diff_d.txt"), []byte("line1\nchanged\nline3\n"), 0644)
+		if err != nil {
+			t.Fatalf("Setup failed: %v", err)
+		}
+
+		req := newAuthRequest("GET", "/diff?a=diff_c.txt&b=diff_d.txt", nil)
+		rr := httptest.NewRecorder()
+		handleDiff(rootDir, token)(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("Expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		body := rr.Body.String()
+		if !strings.Contains(body, "--- a/diff_c.txt") {
+			t.Errorf("Missing --- header in diff: %q", body)
+		}
+		if !strings.Contains(body, "+++ b/diff_d.txt") {
+			t.Errorf("Missing +++ header in diff: %q", body)
+		}
+		if !strings.Contains(body, "-line2") {
+			t.Errorf("Missing deleted line in diff: %q", body)
+		}
+		if !strings.Contains(body, "+changed") {
+			t.Errorf("Missing inserted line in diff: %q", body)
+		}
+		if !strings.Contains(body, "@@") {
+			t.Errorf("Missing hunk header in diff: %q", body)
+		}
+	})
+
+	t.Run("Diff: missing file a returns 404", func(t *testing.T) {
+		err := os.WriteFile(filepath.Join(tempDir, "diff_exists.txt"), []byte("exists"), 0644)
+		if err != nil {
+			t.Fatalf("Setup failed: %v", err)
+		}
+
+		req := newAuthRequest("GET", "/diff?a=no_such_file.txt&b=diff_exists.txt", nil)
+		rr := httptest.NewRecorder()
+		handleDiff(rootDir, token)(rr, req)
+
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("Expected 404 for missing file a, got %d", rr.Code)
+		}
+	})
+
+	t.Run("Diff: path traversal on a rejected", func(t *testing.T) {
+		err := os.WriteFile(filepath.Join(tempDir, "diff_safe.txt"), []byte("safe"), 0644)
+		if err != nil {
+			t.Fatalf("Setup failed: %v", err)
+		}
+
+		req := newAuthRequest("GET", "/diff?a=../etc/passwd&b=diff_safe.txt", nil)
+		rr := httptest.NewRecorder()
+		handleDiff(rootDir, token)(rr, req)
+
+		if rr.Code == http.StatusOK {
+			t.Error("Security breach: path traversal on a succeeded in diff handler")
+		}
+	})
+
+	t.Run("Diff: path traversal on b rejected", func(t *testing.T) {
+		err := os.WriteFile(filepath.Join(tempDir, "diff_safe2.txt"), []byte("safe"), 0644)
+		if err != nil {
+			t.Fatalf("Setup failed: %v", err)
+		}
+
+		req := newAuthRequest("GET", "/diff?a=diff_safe2.txt&b=../etc/passwd", nil)
+		rr := httptest.NewRecorder()
+		handleDiff(rootDir, token)(rr, req)
+
+		if rr.Code == http.StatusOK {
+			t.Error("Security breach: path traversal on b succeeded in diff handler")
+		}
+	})
+
 	t.Run("Mkdir: created directory is visible in list", func(t *testing.T) {
 		// Create a new directory via the handler
 		req := newAuthRequest("POST", "/mkdir?path=listed_dir", nil)
