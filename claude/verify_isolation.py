@@ -313,8 +313,12 @@ def check_git_no_parent_leak(workspace: str = "/workspace") -> list[str]:
 
 # --- MCP config validation ---
 
-def check_mcp_config(config_path: str) -> list[str]:
-    """Verify MCP config file exists and has valid structure."""
+def check_mcp_config(config_path: str, expected_servers: list[str] | None = None) -> list[str]:
+    """Verify MCP config file exists and has valid structure.
+
+    If expected_servers is provided, every name must be present in mcpServers.
+    Otherwise only the presence of 'fileserver' is checked (legacy behavior).
+    """
     import json
     errors = []
     if not os.path.exists(config_path):
@@ -325,11 +329,25 @@ def check_mcp_config(config_path: str) -> list[str]:
             config = json.load(f)
         if "mcpServers" not in config:
             errors.append(f"MCP config missing 'mcpServers' key: {config_path}")
-        elif "fileserver" not in config["mcpServers"]:
-            errors.append(f"MCP config missing 'fileserver' entry: {config_path}")
+        else:
+            servers = config["mcpServers"]
+            if not isinstance(servers, dict):
+                errors.append(f"MCP config 'mcpServers' must be an object: {config_path}")
+            elif expected_servers is not None:
+                missing = [s for s in expected_servers if s not in servers]
+                if missing:
+                    errors.append(
+                        f"MCP config missing required entries {missing}: {config_path}"
+                    )
+            elif "fileserver" not in servers:
+                errors.append(f"MCP config missing 'fileserver' entry: {config_path}")
     except (json.JSONDecodeError, OSError) as e:
         errors.append(f"MCP config invalid: {config_path}: {e}")
     return errors
+
+
+# Expected MCP server entries baked into codex-server's .mcp.json
+CODEX_EXPECTED_MCP_SERVERS = ["fileserver", "git", "tester", "planner", "logs", "docs"]
 
 PROMPT_DIRS_DEFAULT = ["/app/prompts", "/home/appuser/.claude/commands"]
 
@@ -439,9 +457,15 @@ def verify_all(role: str) -> None:
         git_errors = check_git_no_parent_leak("/workspace")
         violations.extend(git_errors)
 
-    # 8. MCP config validation (claude-server only)
+    # 8. MCP config validation (claude-server and codex-server)
     if role == "claude-server":
         mcp_errors = check_mcp_config("/home/appuser/sandbox/.mcp.json")
+        violations.extend(mcp_errors)
+    if role == "codex-server":
+        mcp_errors = check_mcp_config(
+            "/home/appuser/sandbox/.mcp.json",
+            expected_servers=CODEX_EXPECTED_MCP_SERVERS,
+        )
         violations.extend(mcp_errors)
 
     # 9. Prompt immutability (claude-server only)
@@ -476,6 +500,8 @@ def _count_checks(role: str) -> int:
     if role == "claude-server":
         count += 1  # MCP config validation
         count += 1  # Prompt immutability
+    if role == "codex-server":
+        count += 1  # MCP config validation
     return count
 
 
