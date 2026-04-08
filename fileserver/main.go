@@ -489,6 +489,274 @@ func handleCopy(rootDir *os.Root, token string) http.HandlerFunc {
 	}
 }
 
+// handleDiff produces a unified diff (3-line context) of two files in the workspace.
+// GET /diff?a=<path>&b=<path>
+// Returns 200 with empty body if identical, 200 with diff text if different,
+// 400 for missing params, 404 for missing files, 500 for read errors.
+func handleDiff(rootDir *os.Root, token string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !verifyToken(r, token) {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		aPath := r.URL.Query().Get("a")
+		bPath := r.URL.Query().Get("b")
+		if aPath == "" || bPath == "" {
+			http.Error(w, "Bad Request: a and b are required", http.StatusBadRequest)
+			return
+		}
+
+		readLines := func(path string) ([]string, error) {
+			f, err := rootDir.Open(path)
+			if err != nil {
+				return nil, err
+			}
+			defer f.Close()
+			var lines []string
+			scanner := bufio.NewScanner(f)
+			for scanner.Scan() {
+				lines = append(lines, scanner.Text())
+			}
+			return lines, scanner.Err()
+		}
+
+		aLines, err := readLines(aPath)
+		if err != nil {
+			http.Error(w, "File not found: a", http.StatusNotFound)
+			return
+		}
+		bLines, err := readLines(bPath)
+		if err != nil {
+			http.Error(w, "File not found: b", http.StatusNotFound)
+			return
+		}
+
+		diff := computeUnifiedDiff(aLines, bLines, aPath, bPath)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(diff))
+	}
+}
+
+// computeUnifiedDiff returns a unified diff string with 3-line context.
+// Returns empty string if files are identical.
+func computeUnifiedDiff(aLines, bLines []string, aName, bName string) string {
+	type editOp byte
+	const (
+		opEqual  editOp = '='
+		opInsert editOp = '+'
+		opDelete editOp = '-'
+	)
+	type edit struct {
+		op   editOp
+		line string
+	}
+
+	m, n := len(aLines), len(bLines)
+
+	// Build LCS DP table
+	dp := make([][]int, m+1)
+	for i := range dp {
+		dp[i] = make([]int, n+1)
+	}
+	for i := 1; i <= m; i++ {
+		for j := 1; j <= n; j++ {
+			if aLines[i-1] == bLines[j-1] {
+				dp[i][j] = dp[i-1][j-1] + 1
+			} else if dp[i-1][j] >= dp[i][j-1] {
+				dp[i][j] = dp[i-1][j]
+			} else {
+				dp[i][j] = dp[i][j-1]
+			}
+		}
+	}
+
+	// Trace back to produce edits
+	edits := make([]edit, 0, m+n)
+	i, j := m, n
+	for i > 0 || j > 0 {
+		switch {
+		case i > 0 && j > 0 && aLines[i-1] == bLines[j-1]:
+			edits = append(edits, edit{opEqual, aLines[i-1]})
+			i--
+			j--
+		case j > 0 && (i == 0 || dp[i][j-1] >= dp[i-1][j]):
+			edits = append(edits, edit{opInsert, bLines[j-1]})
+			j--
+		default:
+			edits = append(edits, edit{opDelete, aLines[i-1]})
+			i--
+		}
+	}
+	// Reverse
+	for l, r := 0, len(edits)-1; l < r; l, r = l+1, r-1 {
+		edits[l], edits[r] = edits[r], edits[l]
+	}
+
+	// Check if all equal
+	allEqual := true
+	for _, e := range edits {
+		if e.op != opEqual {
+			allEqual = false
+			break
+		}
+	}
+	if allEqual {
+		return ""
+	}
+
+	const ctx = 3
+
+	// Find changed edit indices
+	type hunk struct {
+		start, end int // indices into edits slice (inclusive)
+	}
+	var hunks []hunk
+	for idx := 0; idx < len(edits); idx++ {
+		if edits[idx].op != opEqual {
+			s := idx - ctx
+			if s < 0 {
+				s = 0
+			}
+			e := idx + ctx
+			// Extend to cover all changes within ctx of each other
+			for e < len(edits) {
+				if edits[e].op != opEqual {
+					e += ctx + 1
+				} else {
+					e++
+				}
+				if e-idx > 2*ctx+1 {
+					// check if there's a nearby change
+					hasChange := false
+					for k := idx + 1; k <= e && k < len(edits); k++ {
+						if edits[k].op != opEqual {
+							hasChange = true
+							break
+						}
+					}
+					if !hasChange {
+						break
+					}
+				}
+			}
+			// Actually use a simpler approach: extend until no change within ctx
+			// Reset and redo
+			_ = e
+			break
+		}
+	}
+	// Simpler hunk grouping: mark all changed positions, group those within 2*ctx of each other
+	changed := make([]bool, len(edits))
+	for idx, e := range edits {
+		if e.op != opEqual {
+			changed[idx] = true
+		}
+	}
+	hunks = nil
+	idx := 0
+	for idx < len(edits) {
+		if !changed[idx] {
+			idx++
+			continue
+		}
+		s := idx - ctx
+		if s < 0 {
+			s = 0
+		}
+		e := idx + ctx
+		if e >= len(edits) {
+			e = len(edits) - 1
+		}
+		// Extend while there's a change within ctx of current end
+		for {
+			extended := false
+			for k := e + 1; k < len(edits) && k <= e+ctx; k++ {
+				if changed[k] {
+					e = k + ctx
+					if e >= len(edits) {
+						e = len(edits) - 1
+					}
+					extended = true
+				}
+			}
+			if !extended {
+				break
+			}
+		}
+		hunks = append(hunks, hunk{s, e})
+		idx = e + 1
+	}
+
+	// Build output
+	var sb strings.Builder
+	sb.WriteString("--- a/")
+	sb.WriteString(aName)
+	sb.WriteByte('\n')
+	sb.WriteString("+++ b/")
+	sb.WriteString(bName)
+	sb.WriteByte('\n')
+
+	for _, h := range hunks {
+		// Count old/new line numbers and spans
+		aStart, aCount, bStart, bCount := 0, 0, 0, 0
+		// Compute aStart/bStart: count lines before h.start
+		for k := 0; k < h.start; k++ {
+			if edits[k].op == opEqual || edits[k].op == opDelete {
+				aStart++
+			}
+			if edits[k].op == opEqual || edits[k].op == opInsert {
+				bStart++
+			}
+		}
+		for k := h.start; k <= h.end; k++ {
+			if edits[k].op == opEqual || edits[k].op == opDelete {
+				aCount++
+			}
+			if edits[k].op == opEqual || edits[k].op == opInsert {
+				bCount++
+			}
+		}
+		sb.WriteString("@@ -")
+		sb.WriteString(itoa(aStart + 1))
+		sb.WriteByte(',')
+		sb.WriteString(itoa(aCount))
+		sb.WriteString(" +")
+		sb.WriteString(itoa(bStart + 1))
+		sb.WriteByte(',')
+		sb.WriteString(itoa(bCount))
+		sb.WriteString(" @@\n")
+		for k := h.start; k <= h.end; k++ {
+			switch edits[k].op {
+			case opEqual:
+				sb.WriteByte(' ')
+			case opInsert:
+				sb.WriteByte('+')
+			case opDelete:
+				sb.WriteByte('-')
+			}
+			sb.WriteString(edits[k].line)
+			sb.WriteByte('\n')
+		}
+	}
+	return sb.String()
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	buf := [20]byte{}
+	pos := len(buf)
+	for n > 0 {
+		pos--
+		buf[pos] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[pos:])
+}
+
 // setupRouter isolates the routing logic so it can be tested independently
 func setupRouter(rootDir *os.Root, token string) *http.ServeMux {
 	mux := http.NewServeMux()
@@ -521,6 +789,9 @@ func setupRouter(rootDir *os.Root, token string) *http.ServeMux {
 
 	// copy file
 	mux.HandleFunc("/copy", handleCopy(rootDir, token))
+
+	// diff two files
+	mux.HandleFunc("/diff", handleDiff(rootDir, token))
 
 	return mux
 }
