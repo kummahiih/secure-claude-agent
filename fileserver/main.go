@@ -420,6 +420,75 @@ func handleAppend(rootDir *os.Root, token string) http.HandlerFunc {
 	}
 }
 
+// handleCopy copies a file from src to dst within the workspace jail.
+// POST /copy  body: {"src":"...","dst":"...","overwrite":false}
+// Returns 200 OK, 400 Bad Request, 404 Not Found, 409 Conflict, 500 Internal Server Error.
+func handleCopy(rootDir *os.Root, token string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !verifyToken(r, token) {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		var req struct {
+			Src       string `json:"src"`
+			Dst       string `json:"dst"`
+			Overwrite bool   `json:"overwrite"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+			return
+		}
+
+		if req.Src == "" || req.Dst == "" {
+			http.Error(w, "Bad Request: src and dst are required", http.StatusBadRequest)
+			return
+		}
+
+		// Read source file via os.Root (path traversal structurally impossible)
+		srcFile, err := rootDir.Open(req.Src)
+		if err != nil {
+			http.Error(w, "Source file not found", http.StatusNotFound)
+			return
+		}
+		data, err := io.ReadAll(srcFile)
+		srcFile.Close()
+		if err != nil {
+			log.Printf("COPY_READ_ERROR: %v", err)
+			http.Error(w, "Error reading source file", http.StatusInternalServerError)
+			return
+		}
+
+		// Open destination with appropriate flags
+		flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
+		if req.Overwrite {
+			flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+		}
+
+		dstFile, err := rootDir.OpenFile(req.Dst, flags, 0644)
+		if err != nil {
+			if os.IsExist(err) {
+				http.Error(w, "Destination already exists", http.StatusConflict)
+				return
+			}
+			log.Printf("COPY_OPEN_DST_ERROR: %v", err)
+			http.Error(w, "Error opening destination file", http.StatusInternalServerError)
+			return
+		}
+		defer dstFile.Close()
+
+		if _, err = dstFile.Write(data); err != nil {
+			log.Printf("COPY_WRITE_ERROR: %v", err)
+			http.Error(w, "Error writing destination file", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		log.Printf("FILE_COPIED: %s -> %s (%d bytes)", req.Src, req.Dst, len(data))
+	}
+}
+
 // setupRouter isolates the routing logic so it can be tested independently
 func setupRouter(rootDir *os.Root, token string) *http.ServeMux {
 	mux := http.NewServeMux()
@@ -449,6 +518,9 @@ func setupRouter(rootDir *os.Root, token string) *http.ServeMux {
 
 	// create directory
 	mux.HandleFunc("/mkdir", handleMkdir(rootDir, token))
+
+	// copy file
+	mux.HandleFunc("/copy", handleCopy(rootDir, token))
 
 	return mux
 }
