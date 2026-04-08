@@ -497,6 +497,131 @@ func TestMCPHandlers(t *testing.T) {
 		}
 	})
 
+	// ── Copy tests ────────────────────────────────────────────────────────────
+
+	t.Run("Copy: happy path copies content", func(t *testing.T) {
+		err := os.WriteFile(filepath.Join(tempDir, "copy_src.txt"), []byte("copy me"), 0644)
+		if err != nil {
+			t.Fatalf("Setup failed: %v", err)
+		}
+
+		body, _ := json.Marshal(map[string]interface{}{
+			"src": "copy_src.txt",
+			"dst": "copy_dst.txt",
+		})
+		req := newAuthRequest("POST", "/copy", bytes.NewBuffer(body))
+		rr := httptest.NewRecorder()
+		handleCopy(rootDir, token)(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("Copy returned status %d: %s", rr.Code, rr.Body.String())
+		}
+
+		got, _ := os.ReadFile(filepath.Join(tempDir, "copy_dst.txt"))
+		if string(got) != "copy me" {
+			t.Errorf("Copy content mismatch: %q", string(got))
+		}
+	})
+
+	t.Run("Copy: overwrite=true replaces existing dst", func(t *testing.T) {
+		err := os.WriteFile(filepath.Join(tempDir, "copy_src2.txt"), []byte("new content"), 0644)
+		if err != nil {
+			t.Fatalf("Setup failed: %v", err)
+		}
+		err = os.WriteFile(filepath.Join(tempDir, "copy_dst2.txt"), []byte("old content"), 0644)
+		if err != nil {
+			t.Fatalf("Setup failed: %v", err)
+		}
+
+		body, _ := json.Marshal(map[string]interface{}{
+			"src":       "copy_src2.txt",
+			"dst":       "copy_dst2.txt",
+			"overwrite": true,
+		})
+		req := newAuthRequest("POST", "/copy", bytes.NewBuffer(body))
+		rr := httptest.NewRecorder()
+		handleCopy(rootDir, token)(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("Copy with overwrite returned status %d: %s", rr.Code, rr.Body.String())
+		}
+
+		got, _ := os.ReadFile(filepath.Join(tempDir, "copy_dst2.txt"))
+		if string(got) != "new content" {
+			t.Errorf("Overwrite content mismatch: %q", string(got))
+		}
+	})
+
+	t.Run("Copy: missing src returns 404", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]interface{}{
+			"src": "no_such_src.txt",
+			"dst": "irrelevant.txt",
+		})
+		req := newAuthRequest("POST", "/copy", bytes.NewBuffer(body))
+		rr := httptest.NewRecorder()
+		handleCopy(rootDir, token)(rr, req)
+
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("Expected 404 for missing src, got %d", rr.Code)
+		}
+	})
+
+	t.Run("Copy: dst already exists without overwrite returns 409", func(t *testing.T) {
+		err := os.WriteFile(filepath.Join(tempDir, "copy_src3.txt"), []byte("content"), 0644)
+		if err != nil {
+			t.Fatalf("Setup failed: %v", err)
+		}
+		err = os.WriteFile(filepath.Join(tempDir, "copy_dst3.txt"), []byte("existing"), 0644)
+		if err != nil {
+			t.Fatalf("Setup failed: %v", err)
+		}
+
+		body, _ := json.Marshal(map[string]interface{}{
+			"src": "copy_src3.txt",
+			"dst": "copy_dst3.txt",
+		})
+		req := newAuthRequest("POST", "/copy", bytes.NewBuffer(body))
+		rr := httptest.NewRecorder()
+		handleCopy(rootDir, token)(rr, req)
+
+		if rr.Code != http.StatusConflict {
+			t.Errorf("Expected 409 Conflict, got %d", rr.Code)
+		}
+	})
+
+	t.Run("Copy: path traversal on src is rejected", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]interface{}{
+			"src": "../etc/passwd",
+			"dst": "stolen.txt",
+		})
+		req := newAuthRequest("POST", "/copy", bytes.NewBuffer(body))
+		rr := httptest.NewRecorder()
+		handleCopy(rootDir, token)(rr, req)
+
+		if rr.Code == http.StatusOK {
+			t.Error("Security breach: path traversal on src succeeded")
+		}
+	})
+
+	t.Run("Copy: path traversal on dst is rejected", func(t *testing.T) {
+		err := os.WriteFile(filepath.Join(tempDir, "legit_src.txt"), []byte("legit"), 0644)
+		if err != nil {
+			t.Fatalf("Setup failed: %v", err)
+		}
+
+		body, _ := json.Marshal(map[string]interface{}{
+			"src": "legit_src.txt",
+			"dst": "../etc/evil.txt",
+		})
+		req := newAuthRequest("POST", "/copy", bytes.NewBuffer(body))
+		rr := httptest.NewRecorder()
+		handleCopy(rootDir, token)(rr, req)
+
+		if rr.Code == http.StatusOK {
+			t.Error("Security breach: path traversal on dst succeeded")
+		}
+	})
+
 	t.Run("Mkdir: created directory is visible in list", func(t *testing.T) {
 		// Create a new directory via the handler
 		req := newAuthRequest("POST", "/mkdir?path=listed_dir", nil)
