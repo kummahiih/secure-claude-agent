@@ -126,6 +126,19 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["path"]
             }
         ),
+        types.Tool(
+            name="copy_file",
+            description="Copies a file within the workspace from src to dst.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "src": {"type": "string", "description": "Source file path"},
+                    "dst": {"type": "string", "description": "Destination file path"},
+                    "overwrite": {"type": "boolean", "description": "Overwrite dst if it exists (default false)"}
+                },
+                "required": ["src", "dst"]
+            }
+        ),
     ]
 
 
@@ -267,6 +280,21 @@ async def _dispatch(name: str, arguments: dict) -> str:
             return "Directory created"
         elif response.status_code == 409:
             raise FileExistsError(f"Directory already exists: {arguments['path']}")
+        else:
+            raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
+
+    elif name == "copy_file":
+        response = requests.post(
+            f"{MCP_SERVER_URL}/copy",
+            json={"src": arguments["src"], "dst": arguments["dst"], "overwrite": arguments.get("overwrite", False)},
+            headers=HEADERS, verify=VERIFY, timeout=10
+        )
+        if response.status_code == 200:
+            return f"Copied {arguments['src']} to {arguments['dst']}"
+        elif response.status_code == 404:
+            raise FileNotFoundError(f"Source file not found: {arguments['src']}")
+        elif response.status_code == 409:
+            raise FileExistsError(f"Destination already exists: {arguments['dst']}")
         else:
             raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
 
