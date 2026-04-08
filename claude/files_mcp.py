@@ -139,6 +139,18 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["src", "dst"]
             }
         ),
+        types.Tool(
+            name="diff_files",
+            description="Returns a unified diff between two files in the workspace.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path_a": {"type": "string", "description": "First file path"},
+                    "path_b": {"type": "string", "description": "Second file path"}
+                },
+                "required": ["path_a", "path_b"]
+            }
+        ),
     ]
 
 
@@ -295,6 +307,19 @@ async def _dispatch(name: str, arguments: dict) -> str:
             raise FileNotFoundError(f"Source file not found: {arguments['src']}")
         elif response.status_code == 409:
             raise FileExistsError(f"Destination already exists: {arguments['dst']}")
+        else:
+            raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
+
+    elif name == "diff_files":
+        response = requests.get(
+            f"{MCP_SERVER_URL}/diff",
+            params={"a": arguments["path_a"], "b": arguments["path_b"]},
+            headers=HEADERS, verify=VERIFY, timeout=10
+        )
+        if response.status_code == 200:
+            return response.text
+        elif response.status_code == 404:
+            raise FileNotFoundError(response.text)
         else:
             raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
 
