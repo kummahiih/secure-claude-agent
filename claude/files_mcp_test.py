@@ -523,3 +523,36 @@ async def test_copy_file_conflict(mock_post):
     mock_post.return_value.text = "conflict"
     with pytest.raises(FileExistsError):
         await _dispatch("copy_file", {"src": "a.txt", "dst": "existing.txt"})
+
+
+# --- _dispatch: diff_files ---
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.get")
+async def test_diff_files_identical(mock_get):
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.text = ""
+    result = await _dispatch("diff_files", {"path_a": "a.txt", "path_b": "b.txt"})
+    assert result == ""
+    _, kwargs = mock_get.call_args
+    assert kwargs["params"] == {"a": "a.txt", "b": "b.txt"}
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.get")
+async def test_diff_files_changed(mock_get):
+    diff_text = "--- a.txt\n+++ b.txt\n@@ -1 +1 @@\n-old\n+new\n"
+    mock_get.return_value.status_code = 200
+    mock_get.return_value.text = diff_text
+    result = await _dispatch("diff_files", {"path_a": "a.txt", "path_b": "b.txt"})
+    assert "---" in result and "+++" in result
+    assert result == diff_text
+
+
+@pytest.mark.asyncio
+@patch("files_mcp.requests.get")
+async def test_diff_files_not_found(mock_get):
+    mock_get.return_value.status_code = 404
+    mock_get.return_value.text = "file not found"
+    with pytest.raises(FileNotFoundError):
+        await _dispatch("diff_files", {"path_a": "missing.txt", "path_b": "b.txt"})
