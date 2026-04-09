@@ -11,6 +11,7 @@ MCP tool sets: fileserver, git, docs, planner, tester.
    - Batch independent tool calls into a single response.
    - Plan your edits before reading files. Read and edit in the same turn.
    - Use `replace_in_file` or `append_file` — never `write_file` for existing files.
+   - **Refactoring / new similar files**: When creating a file that should resemble an existing one (new server, handler, module, etc.), use `copy_file` to clone the closest existing file, then `replace_in_file` to adapt it. This keeps files structurally identical so common pieces can later be refactored out via simple string substitution. Never recreate similar files from scratch with `write_file` — that wastes tokens and produces divergent structure that resists future refactoring.
 3. After code changes, test and commit:
    a. Call `run_tests`.
    b. Wait 15 seconds, then call `get_test_results`. If still running, wait 30s and retry. Max 3 polls total.
