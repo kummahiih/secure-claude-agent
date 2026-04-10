@@ -269,7 +269,7 @@ class TestDispatchGetFileDedupReport(unittest.TestCase):
     def test_non_empty_response_contains_expected_fields(self):
         dedup_data = [
             {
-                "path": "/workspace/cluster/agent/claude/log_mcp.py",
+                "path": "/workspace/cluster/agent/mcp/log_mcp.py",
                 "sha256": "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
                 "read_count": 3,
                 "est_wasted_tokens": 4200,
@@ -280,7 +280,7 @@ class TestDispatchGetFileDedupReport(unittest.TestCase):
             result = _run(log_mcp._dispatch("get_file_dedup_report", {"session_id": "s1"}))
             url = mock_get.call_args[0][0]
             self.assertEqual(url, f"{BASE}/sessions/s1/file-dedup")
-            self.assertIn("/workspace/cluster/agent/claude/log_mcp.py", result)
+            self.assertIn("/workspace/cluster/agent/mcp/log_mcp.py", result)
             self.assertIn("abcdef123456", result)  # truncated sha256 (first 12 chars)
             self.assertIn("3", result)              # read_count
             self.assertIn("4200", result)           # est_wasted_tokens
