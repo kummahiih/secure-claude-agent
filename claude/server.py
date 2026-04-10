@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 import json
@@ -241,6 +242,9 @@ def _check_upstream_errors(text: str) -> None:
 app = FastAPI(title="Secure Claude Code Server")
 security = HTTPBearer()
 
+# RR-8: Concurrency cap — at most 1 /ask or /plan at a time (subprocess is heavy).
+_ENDPOINT_SEMAPHORE = asyncio.Semaphore(1)
+
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Validates the Bearer token in constant time to prevent timing attacks."""
@@ -344,6 +348,11 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
     _validate_model(request.model)
     query = _expand_slash_command(request.query)
 
+    # RR-8: Reject if another /ask or /plan is already running.
+    if _ENDPOINT_SEMAPHORE.locked():
+        raise HTTPException(status_code=429, detail="Another request is already in progress. Try again later.")
+    await _ENDPOINT_SEMAPHORE.acquire()
+
     task_responses: list[str] = []
 
     try:
@@ -406,6 +415,8 @@ async def ask_agent(request: QueryRequest, token: str = Depends(verify_token)):
     except Exception as e:
         logger.error(f"Agent execution failed: {e}")
         return {"error": str(e)}
+    finally:
+        _ENDPOINT_SEMAPHORE.release()
 
 
 @app.post("/plan")
@@ -414,6 +425,12 @@ async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
     logger.info(f"Received planning query: {request.query} for model: {request.model}")
     _validate_model(request.model)
     query = _expand_slash_command(request.query)
+
+    # RR-8: Reject if another /ask or /plan is already running.
+    if _ENDPOINT_SEMAPHORE.locked():
+        raise HTTPException(status_code=429, detail="Another request is already in progress. Try again later.")
+    await _ENDPOINT_SEMAPHORE.acquire()
+
     session_id = secrets.token_hex(8)
     try:
         t0 = time.monotonic()
@@ -464,6 +481,8 @@ async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
     except Exception as e:
         logger.error(f"Agent execution failed: {e}")
         return {"error": str(e)}
+    finally:
+        _ENDPOINT_SEMAPHORE.release()
 
 
 if __name__ == "__main__":

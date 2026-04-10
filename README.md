@@ -9,8 +9,10 @@ This repo contains the code that runs inside `claude-server` — the FastAPI app
 ```
 secure-claude-agent/
 ├── claude/
-│   ├── server.py               # FastAPI server (POST /ask, POST /plan)
-│   └── verify_isolation.py     # 26 startup isolation checks
+│   └── server.py               # FastAPI server (POST /ask, POST /plan)
+├── isolation/
+│   ├── verify_isolation.py     # 26 startup isolation checks
+│   └── test_isolation.py       # Unit tests for isolation checks
 ├── mcp/
 │   ├── files_mcp.py            # File operations → HTTPS REST → mcp-server
 │   ├── git_mcp.py              # Git operations → HTTPS REST → git-server

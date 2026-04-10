@@ -552,3 +552,89 @@ class TestLogLlmTurns:
         _server_module._log_llm_turns("sess-empty", "claude-sonnet-4-6", [], 100)
         import time; time.sleep(0.05)
         assert captured == []
+
+
+class TestConcurrencyCap:
+    """Tests for RR-8: concurrency cap on /ask and /plan endpoints."""
+
+    def _auth_headers(self):
+        return {"Authorization": f"Bearer {_server_module.CLAUDE_API_TOKEN}"}
+
+    def test_ask_rejects_when_semaphore_locked(self):
+        """Second /ask request gets 429 when semaphore is already held."""
+        from fastapi.testclient import TestClient
+        import asyncio
+
+        client = TestClient(_server_module.app)
+
+        # Manually lock the semaphore to simulate an in-progress request
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_server_module._ENDPOINT_SEMAPHORE.acquire())
+        try:
+            response = client.post("/ask", headers=self._auth_headers(),
+                                   json={"model": "claude-sonnet-4-6", "query": "hello"})
+            assert response.status_code == 429
+            assert "already in progress" in response.json()["detail"]
+        finally:
+            _server_module._ENDPOINT_SEMAPHORE.release()
+            loop.close()
+
+    def test_plan_rejects_when_semaphore_locked(self):
+        """Second /plan request gets 429 when semaphore is already held."""
+        from fastapi.testclient import TestClient
+        import asyncio
+
+        client = TestClient(_server_module.app)
+
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_server_module._ENDPOINT_SEMAPHORE.acquire())
+        try:
+            response = client.post("/plan", headers=self._auth_headers(),
+                                   json={"model": "claude-sonnet-4-6", "query": "plan something"})
+            assert response.status_code == 429
+            assert "already in progress" in response.json()["detail"]
+        finally:
+            _server_module._ENDPOINT_SEMAPHORE.release()
+            loop.close()
+
+    def test_semaphore_released_after_ask(self):
+        """Semaphore is released after /ask completes, allowing subsequent requests."""
+        from fastapi.testclient import TestClient
+
+        client = TestClient(_server_module.app)
+
+        mock_plan_resp = MagicMock()
+        mock_plan_resp.status_code = 404
+
+        mock_sub = MagicMock()
+        mock_sub.returncode = 0
+        mock_sub.stdout = "response"
+        mock_sub.stderr = ""
+
+        with patch("server.requests.get", return_value=mock_plan_resp), \
+             patch("server.subprocess.run", return_value=mock_sub):
+            resp1 = client.post("/ask", headers=self._auth_headers(),
+                                json={"model": "claude-sonnet-4-6", "query": "hello"})
+            assert resp1.status_code == 200
+
+            # Second request should also succeed (semaphore was released)
+            resp2 = client.post("/ask", headers=self._auth_headers(),
+                                json={"model": "claude-sonnet-4-6", "query": "hello again"})
+            assert resp2.status_code == 200
+
+    def test_semaphore_released_on_error(self):
+        """Semaphore is released even when the subagent raises an exception."""
+        from fastapi.testclient import TestClient
+
+        client = TestClient(_server_module.app)
+
+        mock_plan_resp = MagicMock()
+        mock_plan_resp.status_code = 404
+
+        with patch("server.requests.get", return_value=mock_plan_resp), \
+             patch("server.subprocess.run", side_effect=RuntimeError("boom")):
+            resp1 = client.post("/ask", headers=self._auth_headers(),
+                                json={"model": "claude-sonnet-4-6", "query": "hello"})
+
+        # Semaphore should be released — next request should not get 429
+        assert not _server_module._ENDPOINT_SEMAPHORE.locked()
