@@ -10,12 +10,15 @@ This repo contains the code that runs inside `claude-server` — the FastAPI app
 secure-claude-agent/
 ├── claude/
 │   ├── server.py               # FastAPI server (POST /ask, POST /plan)
-│   ├── verify_isolation.py     # 26 startup isolation checks
+│   └── verify_isolation.py     # 26 startup isolation checks
+├── mcp/
 │   ├── files_mcp.py            # File operations → HTTPS REST → mcp-server
-│   ├── git_mcp.py              # Git operations → subprocess
+│   ├── git_mcp.py              # Git operations → HTTPS REST → git-server
 │   ├── docs_mcp.py             # Read-only docs access
 │   ├── plan_mcp.py             # Plan operations → HTTPS REST → plan-server
-│   └── tester_mcp.py           # Test operations → HTTPS REST → tester-server
+│   ├── tester_mcp.py           # Test operations → HTTPS REST → tester-server
+│   ├── log_mcp.py              # Log operations → HTTPS REST → log-server
+│   └── log_emit.py             # Fire-and-forget log event emitter
 ├── fileserver/                 # Go REST server (mcp-server container)
 │   ├── main.go                 # os.OpenRoot jail at /workspace
 │   └── main_test.go
@@ -40,7 +43,7 @@ secure-claude-agent/
 Run the Python unit tests:
 
 ```bash
-cd claude && python -m pytest
+cd mcp && python -m pytest
 ```
 
 Run the Go unit tests:
