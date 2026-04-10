@@ -247,7 +247,7 @@ REQUIRED_PATHS = {
 # /workspace must contain ONLY these top-level entries in mcp-server.
 # Anything else means parent repo content leaked through the mount.
 # Note: claude-server doesn't mount /workspace, so this only applies to mcp-server.
-WORKSPACE_ALLOWED_ENTRIES = {"claude", "fileserver", ".git", ".gitignore", "README.md", "LICENSE"}
+WORKSPACE_ALLOWED_ENTRIES = {"claude", "fileserver", "isolation", ".git", ".gitignore", "README.md", "LICENSE"}
 
 
 # --- .env file scanner ---

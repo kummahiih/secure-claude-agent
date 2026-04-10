@@ -33,4 +33,7 @@ echo "[unit] Running Python MCP tests..."
 (cd mcp && python -m pytest files_mcp_test.py git_mcp_test.py tester_mcp_test.py log_mcp_test.py log_emit_test.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
 
 echo "[unit] Running Python claude tests..."
-(cd claude && python -m pytest claude_tests.py test_isolation.py test_server.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
+(cd claude && python -m pytest claude_tests.py test_server.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
+
+echo "[unit] Running Python isolation tests..."
+(cd isolation && python -m pytest test_isolation.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
