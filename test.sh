@@ -15,6 +15,8 @@ export GIT_API_TOKEN="${GIT_API_TOKEN:-dummy-git-token}"
 export GIT_SERVER_URL="${GIT_SERVER_URL:-https://git-server:8443}"
 export LOG_API_TOKEN="${LOG_API_TOKEN:-dummy-log-token}"
 export LOG_SERVER_URL="${LOG_SERVER_URL:-https://log-server:8443}"
+export CODEX_API_TOKEN="${CODEX_API_TOKEN:-dummy-codex-token}"
+export OPENAI_BASE_URL="${OPENAI_BASE_URL:-https://proxy:4000/v1}"
 
 echo "[unit] Running Go log-server tests..."
 (cd ../log-server && GOTOOLCHAIN=local CGO_ENABLED=0 GOMAXPROCS=1 go test -p 1 -cpu 1 ./... -v 2>&1 | grep -E '(PASS|FAIL|ok|---)')
@@ -34,6 +36,9 @@ echo "[unit] Running Python MCP tests..."
 
 echo "[unit] Running Python claude tests..."
 (cd claude && python -m pytest claude_tests.py test_server.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
+
+echo "[unit] Running Python codex tests..."
+(cd codex && python -m pytest codex_tests.py test_server.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
 
 echo "[unit] Running Python isolation tests..."
 (cd isolation && python -m pytest test_isolation.py -v --tb=short 2>&1 | grep -E '(PASSED|FAILED|ERROR|test_|===)')
