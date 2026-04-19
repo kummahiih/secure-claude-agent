@@ -211,6 +211,15 @@ class TestModelAllowlist:
             response = client.post("/ask", headers=headers, json={"model": "claude-sonnet-4-6", "query": "hello"})
         assert response.status_code == 200
 
+    def test_ask_accepts_opus_4_7(self):
+        headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "ok"
+        with patch("server.subprocess.run", return_value=mock_result):
+            response = client.post("/ask", headers=headers, json={"model": "claude-opus-4-7", "query": "hello"})
+        assert response.status_code == 200
+
     def test_ask_rejects_empty_model(self):
         headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
         response = client.post("/ask", headers=headers, json={"model": "", "query": "hello"})
