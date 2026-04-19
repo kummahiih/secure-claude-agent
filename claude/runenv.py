@@ -17,6 +17,7 @@ def _load_prompt(name: str) -> str:
 SYSTEM_PROMPT = _load_prompt("ask.md")
 PLAN_SYSTEM_PROMPT = _load_prompt("plan.md")
 ADHOC_SYSTEM_PROMPT = _load_prompt("ask-adhoc.md") or "You are a helpful coding assistant. Answer the user's question directly and concisely."
+ADHOC_FAST_SYSTEM_PROMPT = _load_prompt("ask-adhoc-fast.md") or ADHOC_SYSTEM_PROMPT
 
 # Environment variables injected by Docker Compose / run.sh
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "https://mcp-server:8443")
