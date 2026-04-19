@@ -282,3 +282,67 @@ def test_adhoc_active_plan_uses_loop():
     cmd = mock_run.call_args_list[0][0][0]
     idx = cmd.index("--system-prompt")
     assert cmd[idx + 1] == SYSTEM_PROMPT
+
+
+# --- --max-turns 16 enforcement (docs/TOKEN_USE.md §5.2) ---
+
+def _assert_max_turns_16(cmd: list[str]) -> None:
+    """Assert the subprocess argv contains --max-turns 16 adjacent pair."""
+    assert "--max-turns" in cmd, f"--max-turns missing from argv: {cmd}"
+    idx = cmd.index("--max-turns")
+    assert cmd[idx + 1] == "16", f"Expected --max-turns 16, got {cmd[idx + 1]!r}"
+    # Must appear before the query terminator so claude honours it
+    assert idx < cmd.index("--"), "--max-turns must precede -- query terminator"
+
+
+def test_ask_adhoc_enforces_max_turns_16():
+    """/ask with no active plan task must pass --max-turns 16 to claude."""
+    headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = _stream_result("ok")
+
+    mock_no_task = MagicMock()
+    mock_no_task.status_code = 404
+
+    with patch("server.requests.get", return_value=mock_no_task), \
+         patch("server.subprocess.run", return_value=mock_result) as mock_run:
+        response = client.post("/ask", headers=headers, json={"model": "claude-sonnet-4-6", "query": "hi"})
+    assert response.status_code == 200
+    _assert_max_turns_16(mock_run.call_args[0][0])
+
+
+def test_ask_plan_loop_enforces_max_turns_16():
+    """/ask with an active plan task must pass --max-turns 16 on every iteration."""
+    headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
+    mock_task_result = MagicMock()
+    mock_task_result.returncode = 0
+    mock_task_result.stdout = _stream_result("working")
+
+    mock_done_result = MagicMock()
+    mock_done_result.returncode = 0
+    mock_done_result.stdout = _stream_result("DONE")
+
+    mock_has_task = MagicMock()
+    mock_has_task.status_code = 200
+    mock_has_task.json.return_value = {"task": {"id": "t1", "name": "Do"}}
+
+    with patch("server.requests.get", return_value=mock_has_task), \
+         patch("server.subprocess.run", side_effect=[mock_task_result, mock_done_result]) as mock_run:
+        response = client.post("/ask", headers=headers, json={"model": "claude-sonnet-4-6", "query": "go"})
+    assert response.status_code == 200
+    for call in mock_run.call_args_list:
+        _assert_max_turns_16(call[0][0])
+
+
+def test_plan_endpoint_enforces_max_turns_16():
+    """/plan must pass --max-turns 16 to claude (regression guard for §5.2)."""
+    headers = {"Authorization": f"Bearer {os.environ['CLAUDE_API_TOKEN']}"}
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = _stream_result("planned")
+
+    with patch("server.subprocess.run", return_value=mock_result) as mock_run:
+        response = client.post("/plan", headers=headers, json={"model": "claude-sonnet-4-6", "query": "plan it"})
+    assert response.status_code == 200
+    _assert_max_turns_16(mock_run.call_args[0][0])

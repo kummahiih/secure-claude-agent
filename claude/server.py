@@ -437,7 +437,7 @@ async def plan_agent(request: QueryRequest, token: str = Depends(verify_token)):
         t0 = time.monotonic()
         result = subprocess.run(
             [
-                "claude", "--print", "--dangerously-skip-permissions",
+                "claude", "--print", "--max-turns", "16", "--dangerously-skip-permissions",
                 "--output-format", "stream-json",
                 "--verbose",
                 "--mcp-config", "/home/appuser/sandbox/.mcp.json",
