@@ -56,6 +56,10 @@ Every finding must include:
 - **Expected savings**: percentage or absolute token reduction
 - **Implementation effort**: Low / Medium / High
 
+### Rule 5: Model Selection Is Out of Scope
+
+Model selection is fixed and must not be analyzed. The analysis must NOT evaluate, compare, or recommend models (e.g. Opus vs Sonnet vs Haiku), must NOT reference historical model-performance profiles, must NOT compute per-model cost multipliers, and must treat the currently-configured model as fixed. Do not include model-mix breakdowns, model columns, or model-allocation recommendations anywhere in the output.
+
 ---
 
 ## Instructions
@@ -78,7 +82,6 @@ Every finding must include:
    - **Retry waste** — failed operations that could be avoided with better error handling
    - **Tool description overhead** — verbose tool schemas re-sent on every call
    - **Prompt bloat** — system prompt or documentation content that exceeds what's needed
-   - **Model misallocation** — expensive models used for simple tasks
 
 5. **Optimization Plan**: For each waste category, propose specific fixes with quantified savings.
 
